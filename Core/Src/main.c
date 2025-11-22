@@ -223,7 +223,6 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_UART5_Init();
-
   /* USER CODE BEGIN 2 */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
