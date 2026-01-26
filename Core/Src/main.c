@@ -243,8 +243,6 @@ int main(void)
     // 240 Hz -> ~4.17 ms. Start with 10 ms for sanity then tighten.
     HAL_Delay(10);
 
-    printf("FLOAT_TEST: %.3f\r\n", 1.234f);
-
   }
 
     /* USER CODE END WHILE */
