@@ -124,6 +124,44 @@ int __io_putchar(int ch)
     return ch;
 }
 
+static void IMU_Init_LSM6DSV16X(stmdev_ctx_t *ctx) {
+    uint8_t who = 0;
+
+    // 1) WHO_AM_I sanity
+    lsm6dsv16x_device_id_get(ctx, &who);
+
+    // 2) Reset (use one)
+    lsm6dsv16x_sw_reset(ctx);
+    HAL_Delay(10);
+
+    // 3) Force UI to SPI-only behavior (good hygiene)
+    lsm6dsv16x_ui_i2c_i3c_mode_set(ctx, LSM6DSV16X_I2C_I3C_DISABLE);
+    lsm6dsv16x_spi_mode_set(ctx, LSM6DSV16X_SPI_4_WIRE);
+
+    // 4) Safe defaults for multi-byte reads + coherence
+    lsm6dsv16x_auto_increment_set(ctx, 1);
+    lsm6dsv16x_block_data_update_set(ctx, 1);
+
+    // 5) Modes
+    lsm6dsv16x_xl_mode_set(ctx, LSM6DSV16X_XL_HIGH_PERFORMANCE_MD);
+    lsm6dsv16x_gy_mode_set(ctx, LSM6DSV16X_GY_HIGH_PERFORMANCE_MD);
+
+    // 6) Scales (rocket-safe defaults)
+    lsm6dsv16x_xl_full_scale_set(ctx, LSM6DSV16X_16g);
+    lsm6dsv16x_gy_full_scale_set(ctx, LSM6DSV16X_2000dps);
+
+    // 7) Filters (optional)
+    lsm6dsv16x_filt_xl_lp2_set(ctx, 1);
+    lsm6dsv16x_filt_gy_lp1_set(ctx, 1);
+
+    // 8) ODR ON (turns sensors on)
+    lsm6dsv16x_xl_data_rate_set(ctx, LSM6DSV16X_ODR_AT_240Hz);
+    lsm6dsv16x_gy_data_rate_set(ctx, LSM6DSV16X_ODR_AT_240Hz);
+
+    // Give it a moment to start producing samples
+    HAL_Delay(20);
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -165,22 +203,16 @@ int main(void)
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
 
-
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
-
-  // Contains the value read from the specified register
-  uint8_t whoami = 0;
-
-  int correct = 0;
-  int incorrect = 0;
-  float correct_pct = 0;
 
   // Setup lsm6dsv16x_ctx correctly for thios device setup
   lsm6dsv16x_ctx.handle = &hspi2;
   lsm6dsv16x_ctx.mdelay = HAL_Delay;
   lsm6dsv16x_ctx.write_reg = platform_write;
   lsm6dsv16x_ctx.read_reg = platform_read;
+
+  IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
   
   /* USER CODE END 2 */
 
@@ -189,17 +221,29 @@ int main(void)
   while (1)
   {
 
-    lsm6dsv16x_device_id_get(&lsm6dsv16x_ctx, &whoami);
+    // Read raw data (polling, no DRDY required)
+    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
+    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
 
-    if (whoami == 0x70){
-      correct ++;
-      // printf("Success! Who am I register value: 0x%x\r\n", whoami);
-    } else {
-      incorrect ++;
-      // printf("Error! Who am I register value: 0x%x\r\n", whoami);
-    }
+    // Convert
+    accel_g[0] = lsm6dsv16x_from_fs16_to_mg(accel_raw[0]) / 1000.0f;
+    accel_g[1] = lsm6dsv16x_from_fs16_to_mg(accel_raw[1]) / 1000.0f;
+    accel_g[2] = lsm6dsv16x_from_fs16_to_mg(accel_raw[2]) / 1000.0f;
 
-    correct_pct = (float)correct / (float)(correct + incorrect) * 100.0f;
+    gyro_dps[0] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[0]) / 1000.0f;
+    gyro_dps[1] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[1]) / 1000.0f;
+    gyro_dps[2] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[2]) / 1000.0f;
+
+    // CSV line: time_ms, ax,ay,az, gx,gy,gz
+    printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
+           (unsigned long)HAL_GetTick(),
+           accel_g[0], accel_g[1], accel_g[2],
+           gyro_dps[0], gyro_dps[1], gyro_dps[2]);
+
+    // 240 Hz -> ~4.17 ms. Start with 10 ms for sanity then tighten.
+    HAL_Delay(10);
+
+    printf("FLOAT_TEST: %.3f\r\n", 1.234f);
 
   }
 

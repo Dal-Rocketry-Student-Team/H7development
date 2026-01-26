@@ -10,7 +10,7 @@
     },
     {
       "name": "gnu-tools-for-stm32",
-      "version": "13.3.1+st.9"
+      "version": "14.3.1+st.2"
     },
     {
       "name": "st-arm-clangd",
@@ -18,7 +18,47 @@
     },
     {
       "name": "stlink-gdbserver",
-      "version": "7.11.0+st.1"
+      "version": "7.12.0+st.2"
+    },
+    {
+      "name": "programmer",
+      "version": "2.21.0"
+    },
+    {
+      "name": "adoptium-jre",
+      "version": "17.0.16+8.st.1"
+    },
+    {
+      "name": "cube-cmsis-scanner",
+      "version": "2.2.1"
+    },
+    {
+      "name": "cube-code-doc",
+      "version": "0.0.6+st.2"
+    },
+    {
+      "name": "cube-code-manifest",
+      "version": "1.0.9+st.2"
+    },
+    {
+      "name": "cube-wrapper",
+      "version": "0.8.3"
+    },
+    {
+      "name": "jlink-gdbserver",
+      "version": "8.80.0+st.1"
+    },
+    {
+      "name": "st-arm-clang",
+      "version": "19.1.6+st.10"
+    },
+    {
+      "name": "st-arm-clang-hybrid",
+      "version": "19.1.6+st.3"
+    },
+    {
+      "name": "gnu-tools-for-stm32-13_3_1-description",
+      "version": "1.0.1+st.1"
     }
   ]
 }
