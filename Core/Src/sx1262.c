@@ -302,26 +302,32 @@ void SX1262_SetRxTxFallbackMode(sx1262_fallback_t mode)
 
 void SX1262_SetLoRaModulationParams(const sx1262_lora_mod_t *mod)
 {
-    uint8_t params[4] = {
+    /* Datasheet Table 13-42: SetModulationParams always takes 8 parameter bytes.
+     * For LoRa, only the first 4 are meaningful; the rest must be zero. */
+    uint8_t params[8] = {
         (uint8_t)mod->sf,
         (uint8_t)mod->bw,
         (uint8_t)mod->cr,
         mod->ldro ? 0x01 : 0x00,
+        0x00, 0x00, 0x00, 0x00,  /* ModParam5-8: unused for LoRa */
     };
-    SX1262_WriteCommand(SX1262_CMD_SET_MODULATION_PARAMS, params, 4);
+    SX1262_WriteCommand(SX1262_CMD_SET_MODULATION_PARAMS, params, 8);
 }
 
 void SX1262_SetLoRaPacketParams(const sx1262_lora_pkt_t *pkt)
 {
-    uint8_t params[6] = {
+    /* Datasheet Table 13-51: SetPacketParams always takes 9 parameter bytes.
+     * For LoRa, only the first 6 are meaningful; the rest must be zero. */
+    uint8_t params[9] = {
         (uint8_t)((pkt->preamble_len >> 8) & 0xFF),
         (uint8_t)( pkt->preamble_len       & 0xFF),
         pkt->fixed_length ? 0x01 : 0x00,
         pkt->payload_len,
         pkt->crc_on       ? 0x01 : 0x00,
         pkt->invert_iq    ? 0x01 : 0x00,
+        0x00, 0x00, 0x00,  /* PacketParam7-9: unused for LoRa */
     };
-    SX1262_WriteCommand(SX1262_CMD_SET_PACKET_PARAMS, params, 6);
+    SX1262_WriteCommand(SX1262_CMD_SET_PACKET_PARAMS, params, 9);
 }
 
 void SX1262_SetLoRaSyncWord(uint16_t sync_word)
@@ -510,30 +516,62 @@ int SX1262_Init(void)
      *    This SPI command controls the internal SX1262 DIO3 output regardless
      *    of whether the pin is routed externally.
      *    From the Ebyte docs: "Use a DIO3 to power a 32MHz TCXO crystal internally."
-     *    Delay: 5 ms = 5000 µs should be plenty for TCXO startup. */
-    SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 5000);
+     *    Delay: 10 ms = 10000 µs — generous time for TCXO to stabilise. */
+    SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
 
-    /* 4) Calibrate everything (now that TCXO is active).
-     *    Bits: RC64k | RC13M | PLL | ADC_pulse | ADC_bulk_N | ADC_bulk_P | Image = 0x7F */
-    SX1262_Calibrate(0x7F);
+    /* 4) Transition to STDBY_XOSC to actually power up the TCXO via DIO3.
+     *    In STDBY_RC the TCXO is NOT running — the chip only enables DIO3
+     *    when it needs the 32 MHz clock (STDBY_XOSC, FS, TX, RX).
+     *    We must wait here for the TCXO to start and stabilise. */
+    SX1262_SetStandby(SX1262_STDBY_XOSC);
+    SX1262_HW_DelayMs(15);  /* Extra margin on top of the TCXO internal delay */
 
-    /* Clear the XOSC_START_ERR that fires at POR with TCXO */
+    /* 5) Clear the XOSC_START_ERR that fires at POR with TCXO.
+     *    At power-on the chip attempted auto-calibration before it knew
+     *    a TCXO was present, so errors are expected.  Now that the TCXO
+     *    is confirmed running, we clear errors and re-calibrate. */
     SX1262_ClearDeviceErrors();
 
-    /* 5) Set regulator mode: DC-DC is more efficient (requires external inductor,
+    /* 6) Go back to STDBY_RC for calibration (required by datasheet —
+     *    "The calibrate function starts ... in STDBY_RC mode"). */
+    SX1262_SetStandby(SX1262_STDBY_RC);
+
+    /* 7) Now calibrate everything with the TCXO properly configured.
+     *    The chip will automatically enable the TCXO during calibration
+     *    because SetDio3AsTcxoCtrl was already called.
+     *    Bits: RC64k | RC13M | PLL | ADC_pulse | ADC_bulk_N | ADC_bulk_P | Image = 0x7F */
+    SX1262_Calibrate(0x7F);
+    SX1262_HW_DelayMs(5);   /* Calibration takes ~3.5 ms max */
+
+    /* 8) Verify calibration succeeded — retry once if TCXO/PLL still failing */
+    uint16_t init_errors = SX1262_GetDeviceErrors();
+    if (init_errors & 0x0064) {
+        /* XOSC_START_ERR (0x0020), PLL_CALIB_ERR (0x0004), or PLL_LOCK_ERR (0x0040)
+         * still set.  Clear, re-init TCXO, and try again. */
+        SX1262_ClearDeviceErrors();
+        SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
+        SX1262_SetStandby(SX1262_STDBY_XOSC);
+        SX1262_HW_DelayMs(20);
+        SX1262_SetStandby(SX1262_STDBY_RC);
+        SX1262_Calibrate(0x7F);
+        SX1262_HW_DelayMs(5);
+        SX1262_ClearDeviceErrors();
+    }
+
+    /* 9) Set regulator mode: DC-DC is more efficient (requires external inductor,
      *    which is present on the E22 module). */
     SX1262_SetRegulatorMode(SX1262_REGULATOR_DC_DC);
 
-    /* 6) DIO2 (pin 19) is NOT connected on this PCB, so do NOT enable
-     *    DIO2 as automatic RF switch control.  Instead, TXEN and RXEN are
-     *    driven manually by the MCU (PD13 and PD14) in SetTx() and SetRx(). */
+    /* 10) DIO2 (pin 19) is NOT connected on this PCB, so do NOT enable
+     *     DIO2 as automatic RF switch control.  Instead, TXEN and RXEN are
+     *     driven manually by the MCU (PD13 and PD14) in SetTx() and SetRx(). */
     SX1262_SetDio2AsRfSwitchCtrl(false);
 
-    /* 7) Set buffer base addresses: TX at 0x00, RX at 0x80
-     *    This gives 128 bytes each. Adjust if you need larger payloads. */
+    /* 11) Set buffer base addresses: TX at 0x00, RX at 0x80
+     *     This gives 128 bytes each. Adjust if you need larger payloads. */
     SX1262_SetBufferBaseAddress(0x00, 0x80);
 
-    /* 8) After TX/RX, fall back to STDBY_RC (default, saves power) */
+    /* 12) After TX/RX, fall back to STDBY_RC (default, saves power) */
     SX1262_SetRxTxFallbackMode(SX1262_FALLBACK_STDBY_RC);
 
     return 0;

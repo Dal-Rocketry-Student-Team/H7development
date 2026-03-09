@@ -31,6 +31,8 @@
 
 #include "lsm6dsv16x_reg.h" // LSM6DSV16X driver header file
 #include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
+
+#include "sx1262.h"        // SX1262 LoRa driver header file
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -206,13 +208,46 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
 
-  // Setup lsm6dsv16x_ctx correctly for thios device setup
+  // Setup lsm6dsv16x_ctx correctly for this device setup
   lsm6dsv16x_ctx.handle = &hspi2;
   lsm6dsv16x_ctx.mdelay = HAL_Delay;
   lsm6dsv16x_ctx.write_reg = platform_write;
   lsm6dsv16x_ctx.read_reg = platform_read;
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
+
+  /* --- SX1262 LoRa radio initialisation --- */
+  SX1262_Init();
+
+  // Configure LoRa: 915 MHz, SF9, BW125K, CR4/5 - good balance of 
+  // range and data rate for our use case. Adjust as needed.
+  sx1262_lora_mod_t mod = {
+    .sf = SX1262_LORA_SF9,
+    .bw = SX1262_LORA_BW_125K,
+    .cr = SX1262_LORA_CR_4_5,
+    .ldro = false, // not needed because auto-set by library based on SF and BW
+  };
+
+  sx1262_lora_pkt_t pkt = {
+    .preamble_len = 12,      // 12 symbols recommended by Semtech
+    .fixed_length = false,   // explicit header (variable length)
+    .payload_len  = 64,      // max expected payload
+    .crc_on       = true,    // always use CRC for flight data
+    .invert_iq    = false,   // normal IQ
+};
+
+SX1262_ConfigureLora(915000000, &mod, &pkt);
+
+// Debug: manually toggle TXEN/RXEN and print E22_BUSY state
+printf("BUSY pin = %d\r\n", HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
+printf("Toggling TXEN...\r\n");
+HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_SET);
+HAL_Delay(100);
+HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_RESET);
+
+// Also check for device errors after init
+uint16_t errors = SX1262_GetDeviceErrors();
+printf("SX1262 device errors: 0x%04X\r\n", errors);
   
   /* USER CODE END 2 */
 
@@ -235,12 +270,33 @@ int main(void)
     gyro_dps[2] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[2]) / 1000.0f;
 
     // CSV line: time_ms, ax,ay,az, gx,gy,gz
-    printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
-           (unsigned long)HAL_GetTick(),
-           accel_g[0], accel_g[1], accel_g[2],
-           gyro_dps[0], gyro_dps[1], gyro_dps[2]);
+    // printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
+    //        (unsigned long)HAL_GetTick(),
+    //        accel_g[0], accel_g[1], accel_g[2],
+    //        gyro_dps[0], gyro_dps[1], gyro_dps[2]);
 
-    // 240 Hz -> ~4.17 ms. Start with 10 ms for sanity then tighten.
+    // Build telemetry packet
+    uint8_t telem[32];
+    uint32_t tick = HAL_GetTick();
+    memcpy(&telem[0], &tick, 4);
+    memcpy(&telem[4], accel_g, 12);   // 3 floats = 12 bytes
+    memcpy(&telem[16], gyro_dps, 12);  // 3 floats = 12 bytes
+
+    // Update payload length for this specific packet size
+    pkt.payload_len = 28; // 4 (tick) + 12 (accel) + 12 (gyro)
+    SX1262_SetLoRaPacketParams(&pkt);
+
+    // Transmit (blocking for testing, 3s timeout)
+    int result = SX1262_TransmitLora(telem, pkt.payload_len, 3000);
+    if (result == 0) {
+        printf("LoRa TX success: tick=%u\r\n", tick);
+    } else {
+        printf("LoRa TX failed: tick=%u, error=%d\r\n", tick, result);
+    }
+    errors = SX1262_GetDeviceErrors();
+    printf("=====SX1262 device errors: 0x%04X=====\r\n", errors);
+
+    // for 10 Hz telemetry rate
     HAL_Delay(10);
 
   }
