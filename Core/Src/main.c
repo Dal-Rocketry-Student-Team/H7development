@@ -33,6 +33,7 @@
 #include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
 
 #include "sx1262.h"        // SX1262 LoRa driver header file
+#include "sx1262_hw.h"     // SX1262 hardware abstraction header file
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -253,52 +254,52 @@ printf("SX1262 device errors: 0x%04X\r\n", errors);
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+  // === SPI READ SANITY CHECK ===
+// Read back the LoRa sync word we wrote (should be 0x14 at 0x0740, 0x24 at 0x0741)
+uint8_t sync_msb = 0, sync_lsb = 0;
+SX1262_ReadRegister(0x0740, &sync_msb, 1);
+SX1262_ReadRegister(0x0741, &sync_lsb, 1);
+printf("Sync word read back: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
+
+// === DIO1 PIN TEST ===
+// Check DIO1 state before TX
+printf("DIO1 before TX: %d\r\n", HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin));
+
+while (1)
   {
-
-    // Read raw data (polling, no DRDY required)
-    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
-    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
-
-    // Convert
-    accel_g[0] = lsm6dsv16x_from_fs16_to_mg(accel_raw[0]) / 1000.0f;
-    accel_g[1] = lsm6dsv16x_from_fs16_to_mg(accel_raw[1]) / 1000.0f;
-    accel_g[2] = lsm6dsv16x_from_fs16_to_mg(accel_raw[2]) / 1000.0f;
-
-    gyro_dps[0] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[0]) / 1000.0f;
-    gyro_dps[1] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[1]) / 1000.0f;
-    gyro_dps[2] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[2]) / 1000.0f;
-
-    // CSV line: time_ms, ax,ay,az, gx,gy,gz
-    // printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
-    //        (unsigned long)HAL_GetTick(),
-    //        accel_g[0], accel_g[1], accel_g[2],
-    //        gyro_dps[0], gyro_dps[1], gyro_dps[2]);
-
-    // Build telemetry packet
-    uint8_t telem[32];
-    uint32_t tick = HAL_GetTick();
-    memcpy(&telem[0], &tick, 4);
-    memcpy(&telem[4], accel_g, 12);   // 3 floats = 12 bytes
-    memcpy(&telem[16], gyro_dps, 12);  // 3 floats = 12 bytes
-
-    // Update payload length for this specific packet size
-    pkt.payload_len = 28; // 4 (tick) + 12 (accel) + 12 (gyro)
+    uint8_t test[] = "HELLO_LORA_12345";
+    
+    pkt.payload_len = 16;
     SX1262_SetLoRaPacketParams(&pkt);
-
-    // Transmit (blocking for testing, 3s timeout)
-    int result = SX1262_TransmitLora(telem, pkt.payload_len, 3000);
-    if (result == 0) {
-        printf("LoRa TX success: tick=%u\r\n", tick);
-    } else {
-        printf("LoRa TX failed: tick=%u, error=%d\r\n", tick, result);
+    SX1262_WriteBuffer(0x00, test, 16);
+    SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+    
+    printf("DIO1 pre-TX: %d\r\n", HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin));
+    
+    SX1262_SetTx(3000000);
+    
+    // Poll DIO1 HARDWARE PIN instead of SPI IRQ register
+    uint32_t start = HAL_GetTick();
+    uint8_t dio1_seen = 0;
+    while ((HAL_GetTick() - start) < 5000) {
+        if (HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin) == GPIO_PIN_SET) {
+            dio1_seen = 1;
+            break;
+        }
     }
-    errors = SX1262_GetDeviceErrors();
-    printf("=====SX1262 device errors: 0x%04X=====\r\n", errors);
-
-    // for 10 Hz telemetry rate
-    HAL_Delay(10);
-
+    
+    uint32_t elapsed = HAL_GetTick() - start;
+    
+    // NOW read IRQ via SPI for comparison
+    uint16_t irq = SX1262_GetIrqStatus();
+    
+    printf("DIO1=%d after %lu ms, SPI_IRQ=0x%04X\r\n", dio1_seen, elapsed, irq);
+    
+    SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+    SX1262_HW_SetTxEn(0);
+    SX1262_HW_SetRxEn(0);
+    
+    HAL_Delay(1000);
   }
 
     /* USER CODE END WHILE */

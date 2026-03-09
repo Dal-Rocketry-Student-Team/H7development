@@ -57,10 +57,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOB, LSM_INT1_Pin|ICM_NCS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, E22_TXEN_Pin|E22_RXEN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, E22_RESET_Pin|E22_TXEN_Pin|E22_RXEN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(E22_CS_GPIO_Port, E22_CS_Pin, GPIO_PIN_SET);

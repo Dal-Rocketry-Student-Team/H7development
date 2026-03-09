@@ -38,11 +38,11 @@ void SX1262_WriteCommand(uint8_t opcode, const uint8_t *params, uint8_t len)
 
     /* Send opcode */
     uint8_t op = opcode;
-    SX1262_HW_SpiTransfer(&op, NULL, 1);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, &op, 1, HAL_MAX_DELAY);
 
     /* Send parameters */
     if (len > 0 && params != NULL) {
-        SX1262_HW_SpiTransfer(params, NULL, len);
+        HAL_SPI_Transmit(&SX1262_SPI_HANDLE, (uint8_t *)params, len, HAL_MAX_DELAY);
     }
 
     SX1262_HW_NssHigh();
@@ -56,16 +56,14 @@ void SX1262_ReadCommand(uint8_t opcode, uint8_t *result, uint8_t len)
     SX1262_HW_WaitBusy();
     SX1262_HW_NssLow();
 
-    /* Opcode + 1 NOP (status byte) */
-    uint8_t txBuf[2] = { opcode, 0x00 };
-    uint8_t rxBuf[2];
-    SX1262_HW_SpiTransfer(txBuf, rxBuf, 2);
+    /* Send opcode + 1 NOP for status — same pattern as your working IMU driver:
+     * HAL_SPI_Transmit for the command, HAL_SPI_Receive for the response. */
+    uint8_t header[2] = { opcode, 0x00 };
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, header, 2, HAL_MAX_DELAY);
 
-    /* Clock out NOPs to read result bytes */
+    /* Now clock in the result bytes */
     if (len > 0 && result != NULL) {
-        uint8_t nops[256];
-        memset(nops, 0x00, len);
-        SX1262_HW_SpiTransfer(nops, result, len);
+        HAL_SPI_Receive(&SX1262_SPI_HANDLE, result, len, HAL_MAX_DELAY);
     }
 
     SX1262_HW_NssHigh();
@@ -81,8 +79,8 @@ void SX1262_WriteRegister(uint16_t addr, const uint8_t *data, uint8_t len)
         (uint8_t)(addr >> 8),
         (uint8_t)(addr & 0xFF)
     };
-    SX1262_HW_SpiTransfer(header, NULL, 3);
-    SX1262_HW_SpiTransfer(data, NULL, len);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, header, 3, HAL_MAX_DELAY);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, (uint8_t *)data, len, HAL_MAX_DELAY);
 
     SX1262_HW_NssHigh();
     SX1262_HW_WaitBusy();
@@ -93,20 +91,17 @@ void SX1262_ReadRegister(uint16_t addr, uint8_t *data, uint8_t len)
     SX1262_HW_WaitBusy();
     SX1262_HW_NssLow();
 
-    /* Opcode + addr (2 bytes) + 1 NOP for status = 4 bytes header */
+    /* opcode + addr[15:8] + addr[7:0] + NOP(status) */
     uint8_t header[4] = {
         SX1262_CMD_READ_REGISTER,
         (uint8_t)(addr >> 8),
         (uint8_t)(addr & 0xFF),
         0x00  /* NOP */
     };
-    uint8_t rxDummy[4];
-    SX1262_HW_SpiTransfer(header, rxDummy, 4);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, header, 4, HAL_MAX_DELAY);
 
-    /* Now clock out data */
-    uint8_t nops[256];
-    memset(nops, 0x00, len);
-    SX1262_HW_SpiTransfer(nops, data, len);
+    /* Clock in data bytes */
+    HAL_SPI_Receive(&SX1262_SPI_HANDLE, data, len, HAL_MAX_DELAY);
 
     SX1262_HW_NssHigh();
 }
@@ -117,8 +112,8 @@ void SX1262_WriteBuffer(uint8_t offset, const uint8_t *data, uint8_t len)
     SX1262_HW_NssLow();
 
     uint8_t header[2] = { SX1262_CMD_WRITE_BUFFER, offset };
-    SX1262_HW_SpiTransfer(header, NULL, 2);
-    SX1262_HW_SpiTransfer(data, NULL, len);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, header, 2, HAL_MAX_DELAY);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, (uint8_t *)data, len, HAL_MAX_DELAY);
 
     SX1262_HW_NssHigh();
     SX1262_HW_WaitBusy();
@@ -129,14 +124,12 @@ void SX1262_ReadBuffer(uint8_t offset, uint8_t *data, uint8_t len)
     SX1262_HW_WaitBusy();
     SX1262_HW_NssLow();
 
-    /* Opcode + offset + NOP (status) */
+    /* opcode + offset + NOP(status) */
     uint8_t header[3] = { SX1262_CMD_READ_BUFFER, offset, 0x00 };
-    uint8_t rxDummy[3];
-    SX1262_HW_SpiTransfer(header, rxDummy, 3);
+    HAL_SPI_Transmit(&SX1262_SPI_HANDLE, header, 3, HAL_MAX_DELAY);
 
-    uint8_t nops[256];
-    memset(nops, 0x00, len);
-    SX1262_HW_SpiTransfer(nops, data, len);
+    /* Clock in data bytes */
+    HAL_SPI_Receive(&SX1262_SPI_HANDLE, data, len, HAL_MAX_DELAY);
 
     SX1262_HW_NssHigh();
 }
