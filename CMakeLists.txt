@@ -48,6 +48,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/lsm6dsv16x_reg.c
     Core/Src/MadgwickAHRS.c
+    Core/Src/sx1262.c
+    Core/Src/sx1262_hw.c
 )
 
 # Add include paths

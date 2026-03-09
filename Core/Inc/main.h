@@ -73,6 +73,18 @@ void Error_Handler(void);
 #define SPI_MISO_GPIO_Port GPIOB
 #define SPI_MOSI_Pin GPIO_PIN_15
 #define SPI_MOSI_GPIO_Port GPIOB
+#define E22_RESET_Pin GPIO_PIN_11
+#define E22_RESET_GPIO_Port GPIOD
+#define E22_DIO1_Pin GPIO_PIN_12
+#define E22_DIO1_GPIO_Port GPIOD
+#define E22_TXEN_Pin GPIO_PIN_13
+#define E22_TXEN_GPIO_Port GPIOD
+#define E22_RXEN_Pin GPIO_PIN_14
+#define E22_RXEN_GPIO_Port GPIOD
+#define E22_BUSY_Pin GPIO_PIN_15
+#define E22_BUSY_GPIO_Port GPIOD
+#define E22_CS_Pin GPIO_PIN_6
+#define E22_CS_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 
