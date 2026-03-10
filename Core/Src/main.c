@@ -204,76 +204,8 @@ int main(void)
   MX_TIM3_Init();
   MX_UART5_Init();
   MX_USART3_UART_Init();
-  MX_SPI6_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-
-  MX_SPI6_Init();
-/* USER CODE BEGIN 2 */
-
-printf("\r\n=== BARE SPI6 TEST ===\r\n");
-
-// 1) Verify SPI6 handle is valid
-printf("hspi6.Instance = %p (expect 0x58001400)\r\n", (void*)hspi6.Instance);
-printf("hspi6.State = %d (expect 1=HAL_SPI_STATE_READY)\r\n", hspi6.State);
-
-// 2) Reset the E22 module manually
-HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
-HAL_Delay(10);
-HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
-HAL_Delay(50);
-
-printf("BUSY after reset = %d (expect 0)\r\n",
-       HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
-
-// 3) GetStatus with TransmitReceive - the test that worked before
-{
-    uint8_t tx[2] = {0xC0, 0x00};
-    uint8_t rx[2] = {0xAA, 0xAA};  // Pre-fill with known value
-    HAL_StatusTypeDef ret;
-
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    ret = HAL_SPI_TransmitReceive(&hspi6, tx, rx, 2, 100);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-    printf("Test A (TransmitReceive): ret=%d rx=0x%02X 0x%02X\r\n", ret, rx[0], rx[1]);
-}
-
-// 4) Same but with Transmit + Receive (IMU pattern)
-{
-    uint8_t tx = 0xC0;
-    uint8_t rx = 0xAA;
-    HAL_StatusTypeDef ret1, ret2;
-
-    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    ret1 = HAL_SPI_Transmit(&hspi6, &tx, 1, 100);
-    ret2 = HAL_SPI_Receive(&hspi6, &rx, 1, 100);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-    printf("Test B (Transmit+Receive): ret1=%d ret2=%d rx=0x%02X\r\n", ret1, ret2, rx);
-}
-
-// 5) Read register 0x0740 (sync word default = 0x14)
-{
-    uint8_t tx[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
-    uint8_t rx[5] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
-    HAL_StatusTypeDef ret;
-
-    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    ret = HAL_SPI_TransmitReceive(&hspi6, tx, rx, 5, 100);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-    printf("Test C (ReadReg 0x0740): ret=%d rx=%02X %02X %02X %02X %02X\r\n",
-           ret, rx[0], rx[1], rx[2], rx[3], rx[4]);
-    printf("  Sync MSB = 0x%02X (expect 0x14)\r\n", rx[4]);
-}
-
-printf("=== BARE SPI6 TEST COMPLETE ===\r\n");
-while(1) {} // Stop here
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
@@ -310,49 +242,80 @@ while(1) {} // Stop here
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
 
-  // Verify the driver is using the correct SPI
-  printf("Driver SPI instance = %p\r\n", (void*)SX1262_SPI_HANDLE.Instance);
-  printf("SPI6 instance addr  = %p\r\n", (void*)SPI6);
-  printf("SPI2 instance addr  = %p\r\n", (void*)SPI2);
+  // ============ PLATFORM-STYLE RAW SPI TEST ============
+  // Uses the EXACT same HAL calls as your working IMU driver,
+  // just with E22_NCS instead of LSM_NCS
 
-  // === VERIFY SPI IS NOW WORKING ===
-  uint8_t sync_msb = 0, sync_lsb = 0;
-  SX1262_ReadRegister(0x0740, &sync_msb, 1);
-  SX1262_ReadRegister(0x0741, &sync_lsb, 1);
-  printf("Sync word: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
+  printf("\r\n=== PLATFORM-STYLE SPI TEST ===\r\n");
 
-  uint16_t errors = SX1262_GetDeviceErrors();
-  printf("Device errors: 0x%04X\r\n", errors);
+  // Reset the chip first
+  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
+  HAL_Delay(10);
+  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
+  while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
 
-  uint8_t status = SX1262_GetStatus();
-  printf("Status: 0x%02X (mode=%d cmd=%d)\r\n", status, (status>>4)&0x7, (status>>1)&0x7);
+  // Test: GetStatus using Transmit + Receive (your IMU pattern)
+  {
+    uint8_t opcode = 0xC0;  // GetStatus
+    uint8_t rx[2] = {0xFF, 0xFF};  // Pre-fill so we can see if they change
 
-  // === SINGLE TX TEST WITH DIO1 MONITORING ===
-  uint8_t test[] = "HELLO_LORA_12345";
-  pkt.payload_len = 16;
-  SX1262_SetLoRaPacketParams(&pkt);
-  SX1262_WriteBuffer(0x00, test, 16);
-  SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+    
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_Transmit(&hspi1, &opcode, 1, HAL_MAX_DELAY);
+    HAL_SPI_Receive(&hspi1, rx, 1, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
-  printf("Starting TX...\r\n");
-  SX1262_SetTx(3000000);
-
-  uint32_t start = HAL_GetTick();
-  uint8_t dio1_seen = 0;
-  while ((HAL_GetTick() - start) < 5000) {
-      if (HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin) == GPIO_PIN_SET) {
-          dio1_seen = 1;
-          break;
-      }
+    printf("GetStatus Transmit+Receive: rx=0x%02X\r\n", rx[0]);
+    printf("  mode=%d cmd=%d\r\n", (rx[0]>>4)&0x7, (rx[0]>>1)&0x7);
   }
-  uint32_t elapsed = HAL_GetTick() - start;
-  uint16_t irq = SX1262_GetIrqStatus();
-  printf("DIO1=%d after %lu ms, IRQ=0x%04X\r\n", dio1_seen, elapsed, irq);
 
-  SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-  SX1262_HW_SetTxEn(0);
-  SX1262_HW_SetRxEn(0);
-  printf("Test complete. Entering main loop...\r\n\r\n");
+  // Test: Same thing but with TransmitReceive (Saba library pattern)
+  {
+    uint8_t tx[2] = {0xC0, 0x00};
+    uint8_t rx[2] = {0xFF, 0xFF};
+
+    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+    
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+    printf("GetStatus TransmitReceive:  rx=0x%02X 0x%02X\r\n", rx[0], rx[1]);
+    printf("  mode=%d cmd=%d\r\n", (rx[1]>>4)&0x7, (rx[1]>>1)&0x7);
+  }
+
+  // Test: Also try reading from the IMU right after to prove SPI2 still works
+  {
+    uint8_t who_am_i = 0;
+    uint8_t reg = 0x0F | 0x80;  // WHO_AM_I with read bit
+    
+    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_RESET);
+    HAL_SPI_Transmit(&hspi2, &reg, 1, HAL_MAX_DELAY);
+    HAL_SPI_Receive(&hspi2, &who_am_i, 1, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_SET);
+
+    printf("IMU WHO_AM_I: 0x%02X (expect 0x70)\r\n", who_am_i);
+  }
+
+  // Test: Check HAL return values
+  {
+    uint8_t tx[2] = {0xC0, 0x00};
+    uint8_t rx[2] = {0};
+    HAL_StatusTypeDef ret;
+
+    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+    
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    ret = HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, 100);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+    printf("HAL return = %d (0=OK, 1=ERR, 2=BUSY, 3=TIMEOUT)\r\n", ret);
+    printf("rx = 0x%02X 0x%02X\r\n", rx[0], rx[1]);
+  }
+
+  printf("=== PLATFORM-STYLE TEST COMPLETE ===\r\n\r\n");
     
   /* USER CODE END 2 */
 
@@ -361,48 +324,7 @@ while(1) {} // Stop here
 
   while (1)
   {
-    // Read raw data (polling, no DRDY required)
-    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
-    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
 
-    // Convert
-    accel_g[0] = lsm6dsv16x_from_fs16_to_mg(accel_raw[0]) / 1000.0f;
-    accel_g[1] = lsm6dsv16x_from_fs16_to_mg(accel_raw[1]) / 1000.0f;
-    accel_g[2] = lsm6dsv16x_from_fs16_to_mg(accel_raw[2]) / 1000.0f;
-
-    gyro_dps[0] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[0]) / 1000.0f;
-    gyro_dps[1] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[1]) / 1000.0f;
-    gyro_dps[2] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[2]) / 1000.0f;
-
-    // CSV line: time_ms, ax,ay,az, gx,gy,gz
-    // printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
-    //        (unsigned long)HAL_GetTick(),
-    //        accel_g[0], accel_g[1], accel_g[2],
-    //        gyro_dps[0], gyro_dps[1], gyro_dps[2]);
-
-    // Build telemetry packet
-    uint8_t telem[32];
-    uint32_t tick = HAL_GetTick();
-    memcpy(&telem[0], &tick, 4);
-    memcpy(&telem[4], accel_g, 12);   // 3 floats = 12 bytes
-    memcpy(&telem[16], gyro_dps, 12);  // 3 floats = 12 bytes
-
-    // Update payload length for this specific packet size
-    pkt.payload_len = 28; // 4 (tick) + 12 (accel) + 12 (gyro)
-    SX1262_SetLoRaPacketParams(&pkt);
-
-    // Transmit (blocking for testing, 3s timeout)
-    int result = SX1262_TransmitLora(telem, pkt.payload_len, 3000);
-    if (result == 0) {
-        printf("LoRa TX success: tick=%u\r\n", tick);
-    } else {
-        printf("LoRa TX failed: tick=%u, error=%d\r\n", tick, result);
-    }
-    errors = SX1262_GetDeviceErrors();
-    printf("=====SX1262 device errors: 0x%04X=====\r\n", errors);
-
-    // for 10 Hz telemetry rate
-    HAL_Delay(10);
   }
 
     /* USER CODE END WHILE */

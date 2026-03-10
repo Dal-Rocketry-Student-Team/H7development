@@ -33,7 +33,7 @@
  * =================================================================== */
 
 /* SPI handle — SPI6 is the radio bus on the PCB */
-#define SX1262_SPI_HANDLE       hspi6
+#define SX1262_SPI_HANDLE       hspi1
 
 /* Chip-select (directly from MCU, active low) */
 #define SX1262_NSS_PORT         E22_NCS_GPIO_Port
