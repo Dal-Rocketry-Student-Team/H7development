@@ -63,7 +63,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, E22_TXEN_Pin|E22_RXEN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(E22_CS_GPIO_Port, E22_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : LSM_INT2_Pin LSM_NCS_Pin */
   GPIO_InitStruct.Pin = LSM_INT2_Pin|LSM_NCS_Pin;
@@ -92,12 +92,12 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : E22_CS_Pin */
-  GPIO_InitStruct.Pin = E22_CS_Pin;
+  /*Configure GPIO pin : E22_NCS_Pin */
+  GPIO_InitStruct.Pin = E22_NCS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(E22_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(E22_NCS_GPIO_Port, &GPIO_InitStruct);
 
 }
 

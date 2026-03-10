@@ -83,8 +83,8 @@ void Error_Handler(void);
 #define E22_RXEN_GPIO_Port GPIOD
 #define E22_BUSY_Pin GPIO_PIN_15
 #define E22_BUSY_GPIO_Port GPIOD
-#define E22_CS_Pin GPIO_PIN_6
-#define E22_CS_GPIO_Port GPIOC
+#define E22_NCS_Pin GPIO_PIN_6
+#define E22_NCS_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 

@@ -252,10 +252,10 @@ int main(void)
   uint16_t errors = SX1262_GetDeviceErrors();
   printf("SX1262 device errors: 0x%04X\r\n", errors);
     
-    /* USER CODE END 2 */
+  /* USER CODE END 2 */
 
-    /* Infinite loop */
-    /* USER CODE BEGIN WHILE */
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
     // === SPI READ SANITY CHECK ===
   // Read back the LoRa sync word we wrote (should be 0x14 at 0x0740, 0x24 at 0x0741)
   uint8_t sync_msb = 0, sync_lsb = 0;

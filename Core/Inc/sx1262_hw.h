@@ -5,7 +5,7 @@
  *
  * Pin mapping (verified against schematic):
  *   SPI2  (PB13=SCK, PB14=MISO, PB15=MOSI)  — shared bus with LSM6DSV16X
- *   E22_CS    → PC6   (GPIO output, active low chip select)
+ *   E22_NCS   → PC6   (GPIO output, active low chip select)
  *   E22_BUSY  → PD15  (GPIO input,  high = chip busy)
  *   E22_RXEN  → PD14  (GPIO output, RF-switch RX enable, active high)
  *   E22_TXEN  → PD13  (GPIO output, RF-switch TX enable, active high)
@@ -36,8 +36,8 @@
 #define SX1262_SPI_HANDLE       hspi2
 
 /* Chip-select (directly from MCU, active low) */
-#define SX1262_NSS_PORT         E22_CS_GPIO_Port
-#define SX1262_NSS_PIN          E22_CS_Pin
+#define SX1262_NSS_PORT         E22_NCS_GPIO_Port
+#define SX1262_NSS_PIN          E22_NCS_Pin
 
 /* Hardware reset (active low, PD11) */
 #define SX1262_NRST_PORT        E22_RESET_GPIO_Port
