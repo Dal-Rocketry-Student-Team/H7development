@@ -249,39 +249,48 @@ int main(void)
 
   while (1)
   {
-    uint8_t test[] = "HELLO_LORA_12345";
-    
-    pkt.payload_len = 16;
+    // Read raw data (polling, no DRDY required)
+    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
+    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
+
+    // Convert
+    accel_g[0] = lsm6dsv16x_from_fs16_to_mg(accel_raw[0]) / 1000.0f;
+    accel_g[1] = lsm6dsv16x_from_fs16_to_mg(accel_raw[1]) / 1000.0f;
+    accel_g[2] = lsm6dsv16x_from_fs16_to_mg(accel_raw[2]) / 1000.0f;
+
+    gyro_dps[0] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[0]) / 1000.0f;
+    gyro_dps[1] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[1]) / 1000.0f;
+    gyro_dps[2] = lsm6dsv16x_from_fs2000_to_mdps(gyro_raw[2]) / 1000.0f;
+
+    // CSV line: time_ms, ax,ay,az, gx,gy,gz
+    // printf("%lu,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f,%10.2f\r\n",
+    //        (unsigned long)HAL_GetTick(),
+    //        accel_g[0], accel_g[1], accel_g[2],
+    //        gyro_dps[0], gyro_dps[1], gyro_dps[2]);
+
+    // Build telemetry packet
+    uint8_t telem[32];
+    uint32_t tick = HAL_GetTick();
+    memcpy(&telem[0], &tick, 4);
+    memcpy(&telem[4], accel_g, 12);   // 3 floats = 12 bytes
+    memcpy(&telem[16], gyro_dps, 12);  // 3 floats = 12 bytes
+
+    // Update payload length for this specific packet size
+    pkt.payload_len = 28; // 4 (tick) + 12 (accel) + 12 (gyro)
     SX1262_SetLoRaPacketParams(&pkt);
-    SX1262_WriteBuffer(0x00, test, 16);
-    SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-    
-    printf("DIO1 pre-TX: %d\r\n", HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin));
-    
-    SX1262_SetTx(3000000);
-    
-    // Poll DIO1 HARDWARE PIN instead of SPI IRQ register
-    uint32_t start = HAL_GetTick();
-    uint8_t dio1_seen = 0;
-    while ((HAL_GetTick() - start) < 5000) {
-        if (HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin) == GPIO_PIN_SET) {
-            dio1_seen = 1;
-            break;
-        }
+
+    // Transmit (blocking for testing, 3s timeout)
+    int result = SX1262_TransmitLora(telem, pkt.payload_len, 3000);
+    if (result == 0) {
+        printf("LoRa TX success: tick=%u\r\n", tick);
+    } else {
+        printf("LoRa TX failed: tick=%u, error=%d\r\n", tick, result);
     }
-    
-    uint32_t elapsed = HAL_GetTick() - start;
-    
-    // NOW read IRQ via SPI for comparison
-    uint16_t irq = SX1262_GetIrqStatus();
-    
-    printf("DIO1=%d after %lu ms, SPI_IRQ=0x%04X\r\n", dio1_seen, elapsed, irq);
-    
-    SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-    SX1262_HW_SetTxEn(0);
-    SX1262_HW_SetRxEn(0);
-    
-    HAL_Delay(1000);
+    errors = SX1262_GetDeviceErrors();
+    printf("=====SX1262 device errors: 0x%04X=====\r\n", errors);
+
+    // for 10 Hz telemetry rate
+    HAL_Delay(10);
   }
 
     /* USER CODE END WHILE */
