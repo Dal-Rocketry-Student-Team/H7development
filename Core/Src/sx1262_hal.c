@@ -1,9 +1,9 @@
 /**
- * @file    sx1262_hw.c
+ * @file    sx1262_hal.c
  * @brief   Hardware abstraction implementation for the E22-900MM22S.
  */
 
-#include "sx1262_hw.h"
+#include "sx1262_hal.h"
 
 /* ------------------------------------------------------------------ */
 void SX1262_HW_Init(void)

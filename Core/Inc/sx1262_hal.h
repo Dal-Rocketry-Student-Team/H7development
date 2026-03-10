@@ -1,5 +1,5 @@
 /**
- * @file    sx1262_hw.h
+ * @file    sx1262_hal.h
  * @brief   Hardware abstraction for the E22-900MM22S (SX1262) module
  *          on the H7development PCB (STM32H723VGT6).
  *

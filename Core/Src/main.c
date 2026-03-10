@@ -33,7 +33,7 @@
 #include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
 
 #include "sx1262.h"        // SX1262 LoRa driver header file
-#include "sx1262_hw.h"     // SX1262 hardware abstraction header file
+#include "sx1262_hal.h"     // SX1262 hardware abstraction header file
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
