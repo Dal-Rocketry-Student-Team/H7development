@@ -242,16 +242,44 @@ int main(void)
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
 
-  // Debug: manually toggle TXEN/RXEN and print E22_BUSY state
-  printf("BUSY pin = %d\r\n", HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
-  printf("Toggling TXEN...\r\n");
-  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_SET);
-  HAL_Delay(100);
-  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_RESET);
+  // === VERIFY SPI IS NOW WORKING ===
+  uint8_t sync_msb = 0, sync_lsb = 0;
+  SX1262_ReadRegister(0x0740, &sync_msb, 1);
+  SX1262_ReadRegister(0x0741, &sync_lsb, 1);
+  printf("Sync word: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
 
-  // Also check for device errors after init
   uint16_t errors = SX1262_GetDeviceErrors();
-  printf("SX1262 device errors: 0x%04X\r\n", errors);
+  printf("Device errors: 0x%04X\r\n", errors);
+
+  uint8_t status = SX1262_GetStatus();
+  printf("Status: 0x%02X (mode=%d cmd=%d)\r\n", status, (status>>4)&0x7, (status>>1)&0x7);
+
+  // === SINGLE TX TEST WITH DIO1 MONITORING ===
+  uint8_t test[] = "HELLO_LORA_12345";
+  pkt.payload_len = 16;
+  SX1262_SetLoRaPacketParams(&pkt);
+  SX1262_WriteBuffer(0x00, test, 16);
+  SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+
+  printf("Starting TX...\r\n");
+  SX1262_SetTx(3000000);
+
+  uint32_t start = HAL_GetTick();
+  uint8_t dio1_seen = 0;
+  while ((HAL_GetTick() - start) < 5000) {
+      if (HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin) == GPIO_PIN_SET) {
+          dio1_seen = 1;
+          break;
+      }
+  }
+  uint32_t elapsed = HAL_GetTick() - start;
+  uint16_t irq = SX1262_GetIrqStatus();
+  printf("DIO1=%d after %lu ms, IRQ=0x%04X\r\n", dio1_seen, elapsed, irq);
+
+  SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+  SX1262_HW_SetTxEn(0);
+  SX1262_HW_SetRxEn(0);
+  printf("Test complete. Entering main loop...\r\n\r\n");
     
   /* USER CODE END 2 */
 
