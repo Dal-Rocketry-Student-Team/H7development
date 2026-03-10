@@ -242,80 +242,36 @@ int main(void)
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
 
-  // ============ PLATFORM-STYLE RAW SPI TEST ============
-  // Uses the EXACT same HAL calls as your working IMU driver,
-  // just with E22_NCS instead of LSM_NCS
+  printf("\r\n=== MISO PIN PROBE ===\r\n");
 
-  printf("\r\n=== PLATFORM-STYLE SPI TEST ===\r\n");
+  // De-init whichever SPI is on PA5/6/7 so we can read PA6 as GPIO
+  HAL_SPI_DeInit(&hspi1);  // or hspi6, whichever you have active
 
-  // Reset the chip first
+  GPIO_InitTypeDef g = {0};
+  g.Pin = GPIO_PIN_6;  // PA6 = MISO
+  g.Mode = GPIO_MODE_INPUT;
+  g.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &g);
+
+  // Reset E22 first
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
   HAL_Delay(10);
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
   HAL_Delay(50);
   while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
 
-  // Test: GetStatus using Transmit + Receive (your IMU pattern)
-  {
-    uint8_t opcode = 0xC0;  // GetStatus
-    uint8_t rx[2] = {0xFF, 0xFF};  // Pre-fill so we can see if they change
+  printf("MISO (CS high): %d\r\n",
+        HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6));
 
-    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-    
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit(&hspi1, &opcode, 1, HAL_MAX_DELAY);
-    HAL_SPI_Receive(&hspi1, rx, 1, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+  HAL_Delay(1);
+  printf("MISO (CS low):  %d\r\n",
+        HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6));
 
-    printf("GetStatus Transmit+Receive: rx=0x%02X\r\n", rx[0]);
-    printf("  mode=%d cmd=%d\r\n", (rx[0]>>4)&0x7, (rx[0]>>1)&0x7);
-  }
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
-  // Test: Same thing but with TransmitReceive (Saba library pattern)
-  {
-    uint8_t tx[2] = {0xC0, 0x00};
-    uint8_t rx[2] = {0xFF, 0xFF};
-
-    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-    
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-    printf("GetStatus TransmitReceive:  rx=0x%02X 0x%02X\r\n", rx[0], rx[1]);
-    printf("  mode=%d cmd=%d\r\n", (rx[1]>>4)&0x7, (rx[1]>>1)&0x7);
-  }
-
-  // Test: Also try reading from the IMU right after to prove SPI2 still works
-  {
-    uint8_t who_am_i = 0;
-    uint8_t reg = 0x0F | 0x80;  // WHO_AM_I with read bit
-    
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_RESET);
-    HAL_SPI_Transmit(&hspi2, &reg, 1, HAL_MAX_DELAY);
-    HAL_SPI_Receive(&hspi2, &who_am_i, 1, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_SET);
-
-    printf("IMU WHO_AM_I: 0x%02X (expect 0x70)\r\n", who_am_i);
-  }
-
-  // Test: Check HAL return values
-  {
-    uint8_t tx[2] = {0xC0, 0x00};
-    uint8_t rx[2] = {0};
-    HAL_StatusTypeDef ret;
-
-    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-    
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-    ret = HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, 100);
-    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-    printf("HAL return = %d (0=OK, 1=ERR, 2=BUSY, 3=TIMEOUT)\r\n", ret);
-    printf("rx = 0x%02X 0x%02X\r\n", rx[0], rx[1]);
-  }
-
-  printf("=== PLATFORM-STYLE TEST COMPLETE ===\r\n\r\n");
+  printf("=== MISO PROBE COMPLETE ===\r\n");
+  while(1) {}
     
   /* USER CODE END 2 */
 
