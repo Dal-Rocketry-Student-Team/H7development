@@ -207,6 +207,74 @@ int main(void)
   MX_SPI6_Init();
   /* USER CODE BEGIN 2 */
 
+  MX_SPI6_Init();
+/* USER CODE BEGIN 2 */
+
+printf("\r\n=== BARE SPI6 TEST ===\r\n");
+
+// 1) Verify SPI6 handle is valid
+printf("hspi6.Instance = %p (expect 0x58001400)\r\n", (void*)hspi6.Instance);
+printf("hspi6.State = %d (expect 1=HAL_SPI_STATE_READY)\r\n", hspi6.State);
+
+// 2) Reset the E22 module manually
+HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
+HAL_Delay(10);
+HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
+HAL_Delay(50);
+
+printf("BUSY after reset = %d (expect 0)\r\n",
+       HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
+
+// 3) GetStatus with TransmitReceive - the test that worked before
+{
+    uint8_t tx[2] = {0xC0, 0x00};
+    uint8_t rx[2] = {0xAA, 0xAA};  // Pre-fill with known value
+    HAL_StatusTypeDef ret;
+
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    ret = HAL_SPI_TransmitReceive(&hspi6, tx, rx, 2, 100);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+    printf("Test A (TransmitReceive): ret=%d rx=0x%02X 0x%02X\r\n", ret, rx[0], rx[1]);
+}
+
+// 4) Same but with Transmit + Receive (IMU pattern)
+{
+    uint8_t tx = 0xC0;
+    uint8_t rx = 0xAA;
+    HAL_StatusTypeDef ret1, ret2;
+
+    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    ret1 = HAL_SPI_Transmit(&hspi6, &tx, 1, 100);
+    ret2 = HAL_SPI_Receive(&hspi6, &rx, 1, 100);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+    printf("Test B (Transmit+Receive): ret1=%d ret2=%d rx=0x%02X\r\n", ret1, ret2, rx);
+}
+
+// 5) Read register 0x0740 (sync word default = 0x14)
+{
+    uint8_t tx[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
+    uint8_t rx[5] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
+    HAL_StatusTypeDef ret;
+
+    while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    ret = HAL_SPI_TransmitReceive(&hspi6, tx, rx, 5, 100);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+    printf("Test C (ReadReg 0x0740): ret=%d rx=%02X %02X %02X %02X %02X\r\n",
+           ret, rx[0], rx[1], rx[2], rx[3], rx[4]);
+    printf("  Sync MSB = 0x%02X (expect 0x14)\r\n", rx[4]);
+}
+
+printf("=== BARE SPI6 TEST COMPLETE ===\r\n");
+while(1) {} // Stop here
+
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
 
@@ -241,6 +309,11 @@ int main(void)
   };
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
+
+  // Verify the driver is using the correct SPI
+  printf("Driver SPI instance = %p\r\n", (void*)SX1262_SPI_HANDLE.Instance);
+  printf("SPI6 instance addr  = %p\r\n", (void*)SPI6);
+  printf("SPI2 instance addr  = %p\r\n", (void*)SPI2);
 
   // === VERIFY SPI IS NOW WORKING ===
   uint8_t sync_msb = 0, sync_lsb = 0;

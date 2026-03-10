@@ -43,6 +43,9 @@ extern SPI_HandleTypeDef hspi6;
 void MX_SPI2_Init(void);
 void MX_SPI6_Init(void);
 
+extern SPI_HandleTypeDef hspi6;
+extern SPI_HandleTypeDef hspi2;
+
 /* USER CODE BEGIN Prototypes */
 
 /* USER CODE END Prototypes */

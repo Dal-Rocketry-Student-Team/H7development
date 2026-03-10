@@ -4,7 +4,7 @@
  *          on the H7development PCB (STM32H723VGT6).
  *
  * Pin mapping (verified against schematic):
- *   SPI2  (PA5=SCK, PA6=MISO, PA7=MOSI)  — NOT A shared bus with LSM6DSV16X
+ *   SPI6  (PA5=SCK, PA6=MISO, PA7=MOSI)  — NOT A shared bus with LSM6DSV16X
  *   E22_NCS   → PC6   (GPIO output, active low chip select)
  *   E22_BUSY  → PD15  (GPIO input,  high = chip busy)
  *   E22_RXEN  → PD14  (GPIO output, RF-switch RX enable, active high)
@@ -32,7 +32,7 @@
  * The labels below must match what you set in your .ioc file.
  * =================================================================== */
 
-/* SPI handle — SPI2 is the shared bus on your PCB */
+/* SPI handle — SPI6 is the radio bus on the PCB */
 #define SX1262_SPI_HANDLE       hspi6
 
 /* Chip-select (directly from MCU, active low) */
