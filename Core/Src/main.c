@@ -217,6 +217,56 @@ int main(void)
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
 
+  /* USER CODE BEGIN 2 */
+
+  // ============ CS PIN VERIFICATION TEST ============
+  printf("\r\n=== GPIO PIN VERIFICATION ===\r\n");
+
+  // Print the actual macro values so we can verify they exist and are correct
+  printf("E22_CS_Pin     = 0x%04X\r\n", (unsigned int)E22_CS_Pin);
+  printf("E22_CS_Port    = %p\r\n", (void*)E22_CS_GPIO_Port);
+  printf("LSM_NCS_Pin    = 0x%04X\r\n", (unsigned int)LSM_NCS_Pin);
+  printf("LSM_NCS_Port   = %p\r\n", (void*)LSM_NCS_GPIO_Port);
+  printf("E22_BUSY_Pin   = 0x%04X\r\n", (unsigned int)E22_BUSY_Pin);
+  printf("E22_DIO1_Pin   = 0x%04X\r\n", (unsigned int)E22_DIO1_Pin);
+  printf("E22_RESET_Pin  = 0x%04X\r\n", (unsigned int)E22_RESET_Pin);
+  printf("E22_TXEN_Pin   = 0x%04X\r\n", (unsigned int)E22_TXEN_Pin);
+  printf("E22_RXEN_Pin   = 0x%04X\r\n", (unsigned int)E22_RXEN_Pin);
+
+  // Expected values for LQFP100 STM32H723:
+  // PC6  = GPIO_PIN_6  = 0x0040, Port C = 0x58020800
+  // PC5  = GPIO_PIN_5  = 0x0020, Port C = 0x58020800
+  // PD15 = GPIO_PIN_15 = 0x8000, Port D = 0x58020C00
+  // PD14 = GPIO_PIN_14 = 0x4000, Port D = 0x58020C00
+  // PD13 = GPIO_PIN_13 = 0x2000, Port D = 0x58020C00
+  // PD12 = GPIO_PIN_12 = 0x1000, Port D = 0x58020C00
+  // PD11 = GPIO_PIN_11 = 0x0800, Port D = 0x58020C00
+
+  printf("\r\n=== CS TOGGLE TEST (probe PC6 with multimeter) ===\r\n");
+  for (int i = 0; i < 3; i++) {
+      HAL_GPIO_WritePin(E22_CS_GPIO_Port, E22_CS_Pin, GPIO_PIN_RESET);
+      printf("CS LOW  (should be ~0V on PC6)\r\n");
+      HAL_Delay(3000);
+      HAL_GPIO_WritePin(E22_CS_GPIO_Port, E22_CS_Pin, GPIO_PIN_SET);
+      printf("CS HIGH (should be ~3.3V on PC6)\r\n");
+      HAL_Delay(3000);
+  }
+
+  printf("\r\n=== RESET PIN TOGGLE TEST ===\r\n");
+  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
+  printf("RESET LOW (should be ~0V on PD11)\r\n");
+  HAL_Delay(3000);
+  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
+  printf("RESET HIGH (should be ~3.3V on PD11)\r\n");
+  HAL_Delay(3000);
+
+  printf("\r\nBUSY after reset: %d\r\n", 
+        HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
+
+  printf("=== VERIFICATION COMPLETE ===\r\n\r\n");
+
+  // ============ END CS PIN VERIFICATION ============
+
   /* --- SX1262 LoRa radio initialisation --- */
   SX1262_Init();
 
