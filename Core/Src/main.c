@@ -204,6 +204,7 @@ int main(void)
   MX_TIM3_Init();
   MX_UART5_Init();
   MX_USART3_UART_Init();
+  MX_SPI6_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -240,32 +241,11 @@ int main(void)
   };
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
-
-  // Debug: manually toggle TXEN/RXEN and print E22_BUSY state
-  printf("BUSY pin = %d\r\n", HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
-  printf("Toggling TXEN...\r\n");
-  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_SET);
-  HAL_Delay(100);
-  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_RESET);
-
-  // Also check for device errors after init
-  uint16_t errors = SX1262_GetDeviceErrors();
-  printf("SX1262 device errors: 0x%04X\r\n", errors);
     
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-    // === SPI READ SANITY CHECK ===
-  // Read back the LoRa sync word we wrote (should be 0x14 at 0x0740, 0x24 at 0x0741)
-  uint8_t sync_msb = 0, sync_lsb = 0;
-  SX1262_ReadRegister(0x0740, &sync_msb, 1);
-  SX1262_ReadRegister(0x0741, &sync_lsb, 1);
-  printf("Sync word read back: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
-
-  // === DIO1 PIN TEST ===
-  // Check DIO1 state before TX
-  printf("DIO1 before TX: %d\r\n", HAL_GPIO_ReadPin(E22_DIO1_GPIO_Port, E22_DIO1_Pin));
 
   while (1)
   {

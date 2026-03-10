@@ -59,6 +59,12 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define Servo_Out_Pin GPIO_PIN_1
 #define Servo_Out_GPIO_Port GPIOA
+#define SPI2_CLK_Pin GPIO_PIN_5
+#define SPI2_CLK_GPIO_Port GPIOA
+#define SPI2_MISO_Pin GPIO_PIN_6
+#define SPI2_MISO_GPIO_Port GPIOA
+#define SPI2_MOSI_Pin GPIO_PIN_7
+#define SPI2_MOSI_GPIO_Port GPIOA
 #define LSM_INT2_Pin GPIO_PIN_4
 #define LSM_INT2_GPIO_Port GPIOC
 #define LSM_NCS_Pin GPIO_PIN_5

@@ -4,7 +4,7 @@
  *          on the H7development PCB (STM32H723VGT6).
  *
  * Pin mapping (verified against schematic):
- *   SPI2  (PB13=SCK, PB14=MISO, PB15=MOSI)  — shared bus with LSM6DSV16X
+ *   SPI2  (PA5=SCK, PA6=MISO, PA7=MOSI)  — NOT A shared bus with LSM6DSV16X
  *   E22_NCS   → PC6   (GPIO output, active low chip select)
  *   E22_BUSY  → PD15  (GPIO input,  high = chip busy)
  *   E22_RXEN  → PD14  (GPIO output, RF-switch RX enable, active high)
@@ -13,7 +13,7 @@
  *   E22_RESET → PD11  (GPIO output, active low reset)
  *
  * CubeMX (.ioc) pin configuration:
- *     PC6  → GPIO_Output, label "E22_CS",    init High, Push-Pull, High speed
+ *     PC6  → GPIO_Output, label "E22_NCS",    init High, Push-Pull, High speed
  *     PD15 → GPIO_Input,  label "E22_BUSY",  No pull
  *     PD14 → GPIO_Output, label "E22_RXEN",  init Low,  Push-Pull
  *     PD13 → GPIO_Output, label "E22_TXEN",  init Low,  Push-Pull
@@ -33,7 +33,7 @@
  * =================================================================== */
 
 /* SPI handle — SPI2 is the shared bus on your PCB */
-#define SX1262_SPI_HANDLE       hspi2
+#define SX1262_SPI_HANDLE       hspi6
 
 /* Chip-select (directly from MCU, active low) */
 #define SX1262_NSS_PORT         E22_NCS_GPIO_Port
