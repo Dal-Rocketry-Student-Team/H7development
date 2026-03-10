@@ -241,6 +241,17 @@ int main(void)
   };
 
   SX1262_ConfigureLora(915000000, &mod, &pkt);
+
+  // Debug: manually toggle TXEN/RXEN and print E22_BUSY state
+  printf("BUSY pin = %d\r\n", HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
+  printf("Toggling TXEN...\r\n");
+  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_SET);
+  HAL_Delay(100);
+  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_RESET);
+
+  // Also check for device errors after init
+  uint16_t errors = SX1262_GetDeviceErrors();
+  printf("SX1262 device errors: 0x%04X\r\n", errors);
     
   /* USER CODE END 2 */
 
