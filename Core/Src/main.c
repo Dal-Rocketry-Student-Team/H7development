@@ -204,7 +204,7 @@ int main(void)
   MX_TIM3_Init();
   MX_UART5_Init();
   MX_USART3_UART_Init();
-  MX_SPI1_Init();
+  MX_SPI6_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
@@ -218,59 +218,45 @@ int main(void)
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
 
-  /* USER CODE BEGIN 2 */
+  HAL_SPI_Init(&hspi1);
 
-  /* --- SX1262 LoRa radio initialisation --- */
-  SX1262_Init();
+  printf("\r\n=== LOGIC ANALYZER SPI TEST ===\r\n");
 
-  // Configure LoRa: 915 MHz, SF9, BW125K, CR4/5 - good balance of 
-  // range and data rate for our use case. Adjust as needed.
-  sx1262_lora_mod_t mod = {
-    .sf = SX1262_LORA_SF9,
-    .bw = SX1262_LORA_BW_125K,
-    .cr = SX1262_LORA_CR_4_5,
-    .ldro = false, // not needed because auto-set by library based on SF and BW
-  };
-
-  sx1262_lora_pkt_t pkt = {
-    .preamble_len = 12,      // 12 symbols recommended by Semtech
-    .fixed_length = false,   // explicit header (variable length)
-    .payload_len  = 64,      // max expected payload
-    .crc_on       = true,    // always use CRC for flight data
-    .invert_iq    = false,   // normal IQ
-  };
-
-  SX1262_ConfigureLora(915000000, &mod, &pkt);
-
-  printf("\r\n=== MISO PIN PROBE ===\r\n");
-
-  // De-init whichever SPI is on PA5/6/7 so we can read PA6 as GPIO
-  HAL_SPI_DeInit(&hspi1);  // or hspi6, whichever you have active
-
-  GPIO_InitTypeDef g = {0};
-  g.Pin = GPIO_PIN_6;  // PA6 = MISO
-  g.Mode = GPIO_MODE_INPUT;
-  g.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &g);
-
-  // Reset E22 first
+  // Reset E22
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
   HAL_Delay(10);
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
-  HAL_Delay(50);
+  HAL_Delay(100);
   while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
 
-  printf("MISO (CS high): %d\r\n",
-        HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6));
+  printf("Starting SPI transaction NOW...\r\n");
+  HAL_Delay(500);  // Give you time to start capture
+
+  // Single GetStatus command
+  uint8_t tx[2] = {0xC0, 0x00};
+  uint8_t rx[2] = {0};
 
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_Delay(1);
-  printf("MISO (CS low):  %d\r\n",
-        HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6));
-
+  HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, HAL_MAX_DELAY);
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
-  printf("=== MISO PROBE COMPLETE ===\r\n");
+  HAL_Delay(100);  // Gap between commands
+
+  // Second command: ReadRegister 0x0740 (sync word)
+  uint8_t tx2[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
+  uint8_t rx2[5] = {0};
+
+  while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive(&hspi1, tx2, rx2, 5, HAL_MAX_DELAY);
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+  printf("GetStatus:  rx=0x%02X 0x%02X\r\n", rx[0], rx[1]);
+  printf("ReadReg:    rx=%02X %02X %02X %02X %02X\r\n", 
+        rx2[0], rx2[1], rx2[2], rx2[3], rx2[4]);
+
+  printf("=== CAPTURE COMPLETE ===\r\n");
   while(1) {}
     
   /* USER CODE END 2 */
