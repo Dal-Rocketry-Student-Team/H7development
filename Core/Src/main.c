@@ -220,52 +220,40 @@ int main(void)
 
   HAL_SPI_Init(&hspi1);
 
-  // === SX1262 RANDOM NUMBER GENERATOR TEST ===
-// Reads 4 bytes from registers 0x0819-0x081C to form a 32-bit random number
-// This only works when the chip is in RX mode (analog front-end must be active)
+  /* --- SX1262 LoRa radio initialisation --- */
+  SX1262_Init();
 
-  printf("\r\n=== SX1262 RNG TEST ===\r\n");
+  sx1262_lora_mod_t mod = {
+      .sf = SX1262_LORA_SF9,
+      .bw = SX1262_LORA_BW_125K,
+      .cr = SX1262_LORA_CR_4_5,
+      .ldro = false,
+  };
 
-  // First, put the chip in continuous RX mode briefly to seed the RNG
-  // The random number registers are fed by the analog receiver noise
-  uint8_t tx_setrx[4] = {0x82, 0xFF, 0xFF, 0xFF};  // SetRx continuous
-  uint8_t rx_dummy[4] = {0};
+  sx1262_lora_pkt_t pkt = {
+      .preamble_len = 12,
+      .fixed_length = false,
+      .payload_len  = 64,
+      .crc_on       = true,
+      .invert_iq    = false,
+  };
 
-  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi1, tx_setrx, rx_dummy, 4, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+  SX1262_ConfigureLora(915000000, &mod, &pkt);
 
-  HAL_Delay(10);  // Let the receiver run briefly to generate noise
+  // === VERIFY SPI ===
+  uint8_t sync_msb = 0, sync_lsb = 0;
+  SX1262_ReadRegister(0x0740, &sync_msb, 1);
+  SX1262_ReadRegister(0x0741, &sync_lsb, 1);
+  printf("Sync word: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
 
-  // Read 4 random bytes from 0x0819-0x081C in one read
-  // ReadRegister: [0x1D, addr_hi, addr_lo, NOP(status), data0, data1, data2, data3]
-  uint8_t tx_rng[8] = {0x1D, 0x08, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00};
-  uint8_t rx_rng[8] = {0};
+  uint16_t errors = SX1262_GetDeviceErrors();
+  printf("Device errors: 0x%04X\r\n", errors);
 
-  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi1, tx_rng, rx_rng, 8, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+  printf("SPI OK. Starting continuous TX...\r\n\r\n");
 
-  uint32_t random_number = ((uint32_t)rx_rng[4] << 24) |
-                          ((uint32_t)rx_rng[5] << 16) |
-                          ((uint32_t)rx_rng[6] << 8)  |
-                          ((uint32_t)rx_rng[7]);
-
-  printf("RNG raw bytes: %02X %02X %02X %02X\r\n", rx_rng[4], rx_rng[5], rx_rng[6], rx_rng[7]);
-  printf("Random number: 0x%08lX (%lu)\r\n", random_number, random_number);
-
-  // Go back to standby
-  uint8_t tx_stdby[2] = {0x80, 0x00};  // SetStandby(STDBY_RC)
-  uint8_t rx_stdby[2] = {0};
-
-  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi1, tx_stdby, rx_stdby, 2, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-  printf("=== RNG TEST COMPLETE ===\r\n");
+  // === CONTINUOUS TX LOOP ===
+  uint32_t pkt_count = 0;
+  int result = 0;
     
   /* USER CODE END 2 */
 
@@ -274,6 +262,28 @@ int main(void)
 
   while (1)
   {
+
+    // Build packet with counter and IMU data
+    uint8_t telem[32];
+    uint32_t tick = HAL_GetTick();
+    memcpy(&telem[0], &tick, 4);
+    memcpy(&telem[4], &pkt_count, 4);
+    memcpy(&telem[8], accel_g, 12);
+    memcpy(&telem[20], gyro_dps, 12);
+
+    pkt.payload_len = 32;
+    SX1262_SetLoRaPacketParams(&pkt);
+
+    result = SX1262_TransmitLora(telem, 32, 3000);
+
+    if (result == 0) {
+        printf("[%lu] TX #%lu OK\r\n", tick, pkt_count);
+    } else {
+        printf("[%lu] TX #%lu FAIL err=%d\r\n", tick, pkt_count, result);
+    }
+
+    pkt_count++;
+    HAL_Delay(500);  // ~2 packets per second
 
   }
 
