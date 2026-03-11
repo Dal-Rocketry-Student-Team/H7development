@@ -220,44 +220,52 @@ int main(void)
 
   HAL_SPI_Init(&hspi1);
 
-  printf("\r\n=== LOGIC ANALYZER SPI TEST ===\r\n");
+  // === SX1262 RANDOM NUMBER GENERATOR TEST ===
+// Reads 4 bytes from registers 0x0819-0x081C to form a 32-bit random number
+// This only works when the chip is in RX mode (analog front-end must be active)
 
-  // Reset E22
-  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
-  HAL_Delay(10);
-  HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
-  HAL_Delay(100);
-  while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
+  printf("\r\n=== SX1262 RNG TEST ===\r\n");
 
-  printf("Starting SPI transaction NOW...\r\n");
-  HAL_Delay(500);  // Give you time to start capture
+  // First, put the chip in continuous RX mode briefly to seed the RNG
+  // The random number registers are fed by the analog receiver noise
+  uint8_t tx_setrx[4] = {0x82, 0xFF, 0xFF, 0xFF};  // SetRx continuous
+  uint8_t rx_dummy[4] = {0};
 
-  // Single GetStatus command
-  uint8_t tx[2] = {0xC0, 0x00};
-  uint8_t rx[2] = {0};
-
+  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, HAL_MAX_DELAY);
+  HAL_SPI_TransmitReceive(&hspi1, tx_setrx, rx_dummy, 4, HAL_MAX_DELAY);
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
-  HAL_Delay(100);  // Gap between commands
+  HAL_Delay(10);  // Let the receiver run briefly to generate noise
 
-  // Second command: ReadRegister 0x0740 (sync word)
-  uint8_t tx2[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
-  uint8_t rx2[5] = {0};
+  // Read 4 random bytes from 0x0819-0x081C in one read
+  // ReadRegister: [0x1D, addr_hi, addr_lo, NOP(status), data0, data1, data2, data3]
+  uint8_t tx_rng[8] = {0x1D, 0x08, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00};
+  uint8_t rx_rng[8] = {0};
 
-  while(HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin)) {}
-
+  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi1, tx2, rx2, 5, HAL_MAX_DELAY);
+  HAL_SPI_TransmitReceive(&hspi1, tx_rng, rx_rng, 8, HAL_MAX_DELAY);
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
 
-  printf("GetStatus:  rx=0x%02X 0x%02X\r\n", rx[0], rx[1]);
-  printf("ReadReg:    rx=%02X %02X %02X %02X %02X\r\n", 
-        rx2[0], rx2[1], rx2[2], rx2[3], rx2[4]);
+  uint32_t random_number = ((uint32_t)rx_rng[4] << 24) |
+                          ((uint32_t)rx_rng[5] << 16) |
+                          ((uint32_t)rx_rng[6] << 8)  |
+                          ((uint32_t)rx_rng[7]);
 
-  printf("=== CAPTURE COMPLETE ===\r\n");
-  while(1) {}
+  printf("RNG raw bytes: %02X %02X %02X %02X\r\n", rx_rng[4], rx_rng[5], rx_rng[6], rx_rng[7]);
+  printf("Random number: 0x%08lX (%lu)\r\n", random_number, random_number);
+
+  // Go back to standby
+  uint8_t tx_stdby[2] = {0x80, 0x00};  // SetStandby(STDBY_RC)
+  uint8_t rx_stdby[2] = {0};
+
+  while(!HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == 0) {}
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive(&hspi1, tx_stdby, rx_stdby, 2, HAL_MAX_DELAY);
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+
+  printf("=== RNG TEST COMPLETE ===\r\n");
     
   /* USER CODE END 2 */
 
