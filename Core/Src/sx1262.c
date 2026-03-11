@@ -163,6 +163,18 @@ void SX1262_SetCad(void) {
     SX1262_WriteCommand(SX1262_CMD_SET_CAD, NULL, 0);
 }
 
+void SX1262_SetTxContinuousWave(void) {
+    SX1262_HW_SetRxEn(0);
+    SX1262_HW_SetTxEn(1);
+    SX1262_WriteCommand(SX1262_CMD_SET_TX_CONTINUOUS_WAVE, NULL, 0);
+}
+
+void SX1262_SetTxInfinitePreamble(void) {
+    SX1262_HW_SetRxEn(0);
+    SX1262_HW_SetTxEn(1);
+    SX1262_WriteCommand(SX1262_CMD_SET_TX_INFINITE_PREAMBLE, NULL, 0);
+}
+
 /* ===================================================================
  * Configuration commands
  * =================================================================== */
@@ -363,6 +375,9 @@ int SX1262_Init(void)
     SX1262_SetDio2AsRfSwitchCtrl(false);
     SX1262_SetBufferBaseAddress(0x00, 0x80);
     SX1262_SetRxTxFallbackMode(SX1262_FALLBACK_STDBY_RC);
+
+    /* Apply TX clamp workaround (datasheet errata — prevents sub-optimal PA) */
+    _workaround_tx_clamp();
 
     return 0;
 }

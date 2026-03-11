@@ -220,40 +220,99 @@ int main(void)
 
   HAL_SPI_Init(&hspi1);
 
-  /* --- SX1262 LoRa radio initialisation --- */
-  SX1262_Init();
+  printf("\r\n=== SX1262 Continuous TX Bring-Up ===\r\n");
 
+  /* --------------------------------------------------------
+   * Step 0: Full hardware + chip init (reset, TCXO, cal, DC-DC)
+   * This follows section 14.2 pre-requisites.
+   * -------------------------------------------------------- */
+  int rc = SX1262_Init();
+  printf("SX1262_Init: %s (errors=0x%04X)\r\n",
+         rc == 0 ? "OK" : "FAIL", SX1262_GetDeviceErrors());
+
+  /* --------------------------------------------------------
+   * Step 1-5 (Section 14.2): Configure LoRa radio
+   *   1. SetStandby(STDBY_RC)          — done inside ConfigureLora
+   *   2. SetPacketType(LoRa)           — done inside ConfigureLora
+   *   3. SetRfFrequency(915 MHz)       — done inside ConfigureLora
+   *      + CalibrateImage(902-928 MHz) — done inside ConfigureLora
+   *   4. SetPaConfig(+22 dBm SX1262)   — done inside ConfigureLora
+   *   5. SetTxParams(+22 dBm, 200us)   — done inside ConfigureLora
+   *   + SetModulationParams, SetPacketParams, SyncWord, IRQs
+   * -------------------------------------------------------- */
   sx1262_lora_mod_t mod = {
-      .sf = SX1262_LORA_SF9,
-      .bw = SX1262_LORA_BW_125K,
-      .cr = SX1262_LORA_CR_4_5,
+      .sf   = SX1262_LORA_SF9,
+      .bw   = SX1262_LORA_BW_125K,
+      .cr   = SX1262_LORA_CR_4_5,
       .ldro = false,
   };
 
+  uint8_t payload[] = "HELLO_LORA_ROCKET";
+  uint8_t payload_len = sizeof(payload) - 1;  /* 17 bytes */
+
   sx1262_lora_pkt_t pkt = {
       .preamble_len = 12,
-      .fixed_length = false,
-      .payload_len  = 64,
+      .fixed_length = false,   /* explicit header */
+      .payload_len  = payload_len,
       .crc_on       = true,
       .invert_iq    = false,
   };
 
-  SX1262_ConfigureLora(915000000, &mod, &pkt);
+  SX1262_ConfigureLora(915000000UL, &mod, &pkt);
+  printf("Radio configured: 915 MHz, SF9, BW125K, CR4/5, +22 dBm\r\n");
 
-  // === VERIFY SPI ===
-  uint8_t sync_msb = 0, sync_lsb = 0;
-  SX1262_ReadRegister(0x0740, &sync_msb, 1);
-  SX1262_ReadRegister(0x0741, &sync_lsb, 1);
-  printf("Sync word: 0x%02X 0x%02X (expect 0x14 0x24)\r\n", sync_msb, sync_lsb);
+  /* Quick sanity: read back sync word */
+  {
+      uint8_t sw[2] = {0};
+      SX1262_ReadRegister(SX1262_REG_LORA_SYNC_WORD_MSB, sw, 2);
+      printf("Sync word readback: 0x%02X%02X (expect 0x1424)\r\n", sw[0], sw[1]);
+  }
 
-  uint16_t errors = SX1262_GetDeviceErrors();
-  printf("Device errors: 0x%04X\r\n", errors);
+  /* Check device errors before transmitting */
+  {
+      uint16_t errs = SX1262_GetDeviceErrors();
+      printf("Device errors pre-TX: 0x%04X %s\r\n", errs,
+             errs == 0 ? "(clean)" : "(WARNING)");
+      if (errs) SX1262_ClearDeviceErrors();
+  }
 
-  printf("SPI OK. Starting continuous TX...\r\n\r\n");
+  #define TX_MODE  0  /*0 = CW tone (easiest to see in SDR Sharp)
+                        1 = continuous LoRa packets
+                        2 = infinite LoRa preamble */
 
-  // === CONTINUOUS TX LOOP ===
-  uint32_t pkt_count = 0;
-  int result = 0;
+  #if TX_MODE == 0
+    /* ======== CW TONE MODE ========
+    * Emits an unmodulated carrier at 915 MHz.
+    * In SDR Sharp you'll see a single spike at 915.000 MHz.
+    * Great for verifying the RF path works at all.
+    */
+    printf("Starting CW tone at 915 MHz...\r\n");
+    SX1262_SetStandby(SX1262_STDBY_RC);
+    SX1262_SetPacketType(SX1262_PACKET_TYPE_LORA);
+    SX1262_SetRfFrequency(915000000UL);
+    SX1262_SetPaConfig(0x04, 0x07, 0x00);
+    SX1262_SetTxParams(22, SX1262_RAMP_200_US);
+    SX1262_SetTxContinuousWave();
+    printf("CW active — check SDR Sharp at 915 MHz\r\n");
+    /* CW stays on indefinitely — loop does nothing */
+
+  #elif TX_MODE == 1
+    /* ======== CONTINUOUS LORA PACKET MODE ========
+    * Sends packets in a loop with a short delay between them.
+    * In SDR Sharp you'll see periodic chirp bursts around 915 MHz.
+    */
+    printf("Starting continuous LoRa TX...\r\n");
+
+  #elif TX_MODE == 2
+    /* ======== INFINITE PREAMBLE MODE ========
+    * Emits a continuous LoRa preamble (repeating upchirps).
+    * In SDR Sharp you'll see a steady stream of chirps.
+    */
+    printf("Starting infinite preamble at 915 MHz...\r\n");
+    SX1262_SetTxInfinitePreamble();
+    printf("Preamble active — check SDR Sharp at 915 MHz\r\n");
+
+  #endif
     
   /* USER CODE END 2 */
 
@@ -262,29 +321,23 @@ int main(void)
 
   while (1)
   {
-
-    // Build packet with counter and IMU data
-    uint8_t telem[32];
-    uint32_t tick = HAL_GetTick();
-    memcpy(&telem[0], &tick, 4);
-    memcpy(&telem[4], &pkt_count, 4);
-    memcpy(&telem[8], accel_g, 12);
-    memcpy(&telem[20], gyro_dps, 12);
-
-    pkt.payload_len = 32;
-    SX1262_SetLoRaPacketParams(&pkt);
-
-    result = SX1262_TransmitLora(telem, 32, 3000);
-
-    if (result == 0) {
-        printf("[%lu] TX #%lu OK\r\n", tick, pkt_count);
-    } else {
-        printf("[%lu] TX #%lu FAIL err=%d\r\n", tick, pkt_count, result);
-    }
-
-    pkt_count++;
-    HAL_Delay(500);  // ~2 packets per second
-
+    #if TX_MODE == 1
+      int tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
+      static uint32_t pkt_count = 0;
+      pkt_count++;
+      if (tx_rc == 0) {
+          printf("TX #%lu OK\r\n", pkt_count);
+      } else {
+          printf("TX #%lu FAIL (rc=%d, err=0x%04X)\r\n",
+                 pkt_count, tx_rc, SX1262_GetDeviceErrors());
+          /* Try to recover */
+          SX1262_ClearDeviceErrors();
+          SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+          SX1262_SetStandby(SX1262_STDBY_RC);
+          HAL_Delay(100);
+      }
+      HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
+    #endif
   }
 
     /* USER CODE END WHILE */

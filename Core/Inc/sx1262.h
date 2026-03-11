@@ -234,6 +234,14 @@ typedef struct {
  */
 int SX1262_Init(void);
 
+/* --- Test modes --- */
+
+/** Emit an unmodulated CW tone at the configured frequency/power. */
+void SX1262_SetTxContinuousWave(void);
+
+/** Emit an infinite LoRa preamble (useful for link testing). */
+void SX1262_SetTxInfinitePreamble(void);
+
 /* --- Low-level SPI command helpers --- */
 
 void SX1262_WriteCommand(uint8_t opcode, const uint8_t *params, uint8_t len);

@@ -16,9 +16,9 @@ void SX1262_HW_Init(void)
 void SX1262_HW_Reset(void)
 {
     HAL_GPIO_WritePin(SX1262_NRST_PORT, SX1262_NRST_PIN, GPIO_PIN_RESET);
-    HAL_Delay(1);
+    HAL_Delay(10);   /* 10 ms low pulse (matches working manual sequence) */
     HAL_GPIO_WritePin(SX1262_NRST_PORT, SX1262_NRST_PIN, GPIO_PIN_SET);
-    HAL_Delay(10);
+    HAL_Delay(100);  /* 100 ms for POR + TCXO settling */
     SX1262_HW_WaitBusy();
 }
 
