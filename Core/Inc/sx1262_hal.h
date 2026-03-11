@@ -32,8 +32,8 @@
  * The labels below must match what you set in your .ioc file.
  * =================================================================== */
 
-/* SPI handle — SPI6 is the radio bus on the PCB */
-#define SX1262_SPI_HANDLE       hspi6
+/* SPI handle — SPI1 is the radio bus on the PCB */
+#define SX1262_SPI_HANDLE       hspi1
 
 /* Chip-select (directly from MCU, active low) */
 #define SX1262_NSS_PORT         E22_NCS_GPIO_Port
