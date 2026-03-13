@@ -8,15 +8,15 @@
 void SX1262_HW_Init(void)
 {
     SX1262_HW_NssHigh();
-    SX1262_HW_SetTxEn(0);
-    SX1262_HW_SetRxEn(0);
+    SX1262_HW_SetTx(0);
+    SX1262_HW_SetRx(0);
     SX1262_HW_Reset();
 }
 
 void SX1262_HW_Reset(void)
 {
     HAL_GPIO_WritePin(SX1262_NRST_PORT, SX1262_NRST_PIN, GPIO_PIN_RESET);
-    HAL_Delay(10);   /* 10 ms low pulse (matches working manual sequence) */
+    HAL_Delay(10);   /* 10 ms low pulse */
     HAL_GPIO_WritePin(SX1262_NRST_PORT, SX1262_NRST_PIN, GPIO_PIN_SET);
     HAL_Delay(100);  /* 100 ms for POR + TCXO settling */
     SX1262_HW_WaitBusy();
@@ -53,14 +53,12 @@ uint8_t SX1262_HW_ReadDio1(void)
     return (HAL_GPIO_ReadPin(SX1262_DIO1_PORT, SX1262_DIO1_PIN) == GPIO_PIN_SET) ? 1 : 0;
 }
 
-void SX1262_HW_SetRxEn(uint8_t state)
+void SX1262_HW_SetRx(uint8_t state)
 {
-    HAL_GPIO_WritePin(SX1262_RXEN_PORT, SX1262_RXEN_PIN,
-                      state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(SX1262_RXEN_PORT, SX1262_RXEN_PIN, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
-void SX1262_HW_SetTxEn(uint8_t state)
+void SX1262_HW_SetTx(uint8_t state)
 {
-    HAL_GPIO_WritePin(SX1262_TXEN_PORT, SX1262_TXEN_PIN,
-                      state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(SX1262_TXEN_PORT, SX1262_TXEN_PIN, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }

@@ -394,7 +394,7 @@ int main(void)
       if (errs) SX1262_ClearDeviceErrors();
   }
 
-  #define TX_MODE  0  /*0 = CW tone (easiest to see in SDR Sharp)
+  #define TX_MODE  1  /*0 = CW tone (easiest to see in SDR Sharp)
                         1 = continuous LoRa packets
                         2 = infinite LoRa preamble */
 
@@ -431,6 +431,8 @@ int main(void)
     printf("Preamble active — check SDR Sharp at 915 MHz\r\n");
 
   #endif
+
+  int tx_rc = 0;
     
   /* USER CODE END 2 */
 
@@ -440,7 +442,7 @@ int main(void)
   while (1)
   {
     #if TX_MODE == 1
-      int tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
+      tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
       static uint32_t pkt_count = 0;
       pkt_count++;
       if (tx_rc == 0) {
