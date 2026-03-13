@@ -71,6 +71,8 @@ void Error_Handler(void);
 #define LSM_NCS_GPIO_Port GPIOC
 #define LSM_INT1_Pin GPIO_PIN_0
 #define LSM_INT1_GPIO_Port GPIOB
+#define MS5_NCS_Pin GPIO_PIN_10
+#define MS5_NCS_GPIO_Port GPIOB
 #define ICM_NCS_Pin GPIO_PIN_12
 #define ICM_NCS_GPIO_Port GPIOB
 #define SPI_CLK_Pin GPIO_PIN_13
