@@ -122,12 +122,12 @@ int main(void)
   hspi1.Init.NSSPMode          = SPI_NSS_PULSE_DISABLE;
   hspi1.Init.FifoThreshold     = SPI_FIFO_THRESHOLD_01DATA;
   hspi1.Init.NSS               = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; /* 128/32 = 4 MHz */
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128; /* 128/128 = 1 MHz */
   if (HAL_SPI_Init(&hspi1) != HAL_OK) {
       printf("SPI1 init FAILED\r\n");
       while(1) {}
   }
-  printf("SPI1: NSSP=off, 4 MHz, NSS=soft\r\n");
+  printf("SPI1: NSSP=off, 1 MHz, NSS=soft\r\n");
 
   /* ---- Idle all control pins ---- */
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port,   E22_NCS_Pin,   GPIO_PIN_SET);
