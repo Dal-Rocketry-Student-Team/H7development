@@ -17,6 +17,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <stdint.h>
+
+#include "MS5607SPI.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,6 +34,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
 
@@ -58,6 +61,7 @@ int __io_putchar(int ch)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 
@@ -65,173 +69,42 @@ int main(void)
   MPU_Config();
 
   /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
   /* USER CODE END Init */
 
+  /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
   /* USER CODE END SysInit */
 
+  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_SPI2_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_UART5_Init();
-  MX_USART3_UART_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  printf("\r\n\r\n====== SPI1 BUS TEST — MS5607 BAROMETER ======\r\n");
+  /* ---- MS5607 Barometer Init ---- */
+    printf("\r\n=== MS5607 BAROMETER TEST ===\r\n");
 
-  /* ---- Fix SPI1 for reliable operation ---- */
-  hspi1.Init.NSSPMode          = SPI_NSS_PULSE_DISABLE;
-  hspi1.Init.FifoThreshold     = SPI_FIFO_THRESHOLD_01DATA;
-  hspi1.Init.NSS               = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;  /* 4 MHz */
-  HAL_SPI_Init(&hspi1);
-  printf("SPI1: 4 MHz, NSSP=off, CPOL=0/CPHA=0\r\n\r\n");
+    MS5607StateTypeDef baro_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
 
-  /* ---- Deselect ALL SPI1 devices ---- */
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port,  E22_NCS_Pin,  GPIO_PIN_SET);  /* radio */
-  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port,  MS5_NCS_Pin,  GPIO_PIN_SET);  /* baro  */
+    if (baro_status == MS5607_STATE_READY) {
+        printf("MS5607 init OK - PROM read successful\r\n");
+    } else {
+        printf("MS5607 init FAILED - check wiring and CS pin\r\n");
+    }
 
-  /* ================================================================
-   * MS5607 TEST
-   *
-   * Protocol: SPI mode 0 (CPOL=0, CPHA=0) — matches our SPI1 config
-   * Reset command: 0x1E, then wait 2.8 ms
-   * PROM read:     0xA0 + (addr << 1), returns 16 bits MSB first
-   *   addr 0 = factory/setup
-   *   addr 1 = C1 (pressure sensitivity)
-   *   addr 2 = C2 (pressure offset)
-   *   addr 3 = C3
-   *   addr 4 = C4
-   *   addr 5 = C5 (reference temperature)
-   *   addr 6 = C6
-   *   addr 7 = CRC + serial
-   * ================================================================ */
-
-  /* ---- Step 1: Reset ---- */
-  printf("--- Step 1: Reset (0x1E) ---\r\n");
-  {
-      uint8_t cmd = 0x1E;
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-  }
-  HAL_Delay(5);  /* datasheet says 2.8 ms reload time */
-  printf("Reset sent, waited 5 ms\r\n\r\n");
-
-  /* ---- Step 2: Read all 8 PROM addresses ---- */
-  printf("--- Step 2: Read PROM (calibration data) ---\r\n");
-  uint16_t prom[8] = {0};
-  uint8_t any_nonzero = 0;
-  uint8_t all_ff = 1;
-
-  for (int addr = 0; addr < 8; addr++) {
-      uint8_t cmd = 0xA0 | (addr << 1);   /* PROM read command */
-      uint8_t rx[2] = {0};
-
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_SPI_Receive(&hspi1, rx, 2, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-
-      prom[addr] = ((uint16_t)rx[0] << 8) | rx[1];
-
-      printf("  PROM[%d] cmd=0x%02X -> 0x%04X (%5u)\r\n",
-             addr, cmd, prom[addr], prom[addr]);
-
-      if (prom[addr] != 0x0000) any_nonzero = 1;
-      if (prom[addr] != 0xFFFF) all_ff = 0;
-  }
-
-  printf("\r\n--- Result ---\r\n");
-  if (any_nonzero && !all_ff) {
-      printf(">> PASS: Got real calibration data! SPI1 reads work.\r\n");
-      printf("   C1=%u C2=%u C3=%u C4=%u C5=%u C6=%u\r\n",
-             prom[1], prom[2], prom[3], prom[4], prom[5], prom[6]);
-  } else if (!any_nonzero) {
-      printf(">> FAIL: All zeros — MS5607 not responding.\r\n");
-      printf("   Check: MS5_NCS wiring, PS pin tied LOW for SPI mode,\r\n");
-      printf("   power supply, solder joints.\r\n");
-  } else if (all_ff) {
-      printf(">> FAIL: All 0xFFFF — MISO stuck high.\r\n");
-  } else {
-      printf(">> PARTIAL: Some data, but check values look odd.\r\n");
-  }
-
-  /* ---- Step 3: Quick conversion test ---- */
-  printf("\r\n--- Step 3: Pressure conversion test ---\r\n");
-  {
-      /* Start D1 conversion, OSR=4096 */
-      uint8_t cmd = 0x48;
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-  }
-  HAL_Delay(10);  /* max conversion time is 9.04 ms for OSR=4096 */
-
-  /* ADC read */
-  uint32_t d1_raw = 0;
-  {
-      uint8_t cmd = 0x00;  /* ADC read command */
-      uint8_t rx[3] = {0};
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_SPI_Receive(&hspi1, rx, 3, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-
-      d1_raw = ((uint32_t)rx[0] << 16) | ((uint32_t)rx[1] << 8) | rx[2];
-      printf("  D1 (pressure) raw = %lu (0x%06lX)\r\n",
-             (unsigned long)d1_raw, (unsigned long)d1_raw);
-      if (d1_raw == 0)
-          printf("  >> Zero — conversion may have failed\r\n");
-      else if (d1_raw == 0xFFFFFF)
-          printf("  >> All 1s — MISO stuck\r\n");
-      else
-          printf("  >> Non-zero ADC value — sensor is converting!\r\n");
-  }
-
-  /* ---- Step 4: Temperature conversion ---- */
-  {
-      uint8_t cmd = 0x58;  /* D2 conversion, OSR=4096 */
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-  }
-  HAL_Delay(10);
-  uint32_t d2_raw = 0;
-  {
-      uint8_t cmd = 0x00;
-      uint8_t rx[3] = {0};
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_SPI_Receive(&hspi1, rx, 3, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-
-      d2_raw = ((uint32_t)rx[0] << 16) | ((uint32_t)rx[1] << 8) | rx[2];
-      printf("  D2 (temp)     raw = %lu (0x%06lX)\r\n",
-             (unsigned long)d2_raw, (unsigned long)d2_raw);
-  }
-
-  /* ---- Compute actual temp + pressure if we got real data ---- */
-  if (any_nonzero && !all_ff && d1_raw != 0 && d2_raw != 0) {
-      printf("\r\n--- Computed values ---\r\n");
-      int32_t dT   = (int32_t)d2_raw - ((int32_t)prom[5] << 8);
-      int32_t TEMP = 2000 + ((int64_t)dT * prom[6]) / (1L << 23);
-      int64_t OFF  = ((int64_t)prom[2] << 17) + ((int64_t)prom[4] * dT) / (1L << 6);
-      int64_t SENS = ((int64_t)prom[1] << 16) + ((int64_t)prom[3] * dT) / (1L << 7);
-      int32_t P    = (int32_t)(((int64_t)d1_raw * SENS / (1L << 21)) - OFF) / (1L << 15);
-
-      printf("  Temperature = %ld.%02ld C\r\n", (long)(TEMP/100), (long)(TEMP%100));
-      printf("  Pressure    = %ld.%02ld mbar\r\n", (long)(P/100), (long)(P%100));
-  }
-
-  printf("\r\n====== DONE ======\r\n");
+    // Optional: bump OSR for better resolution (default is OSR_256)
+    MS5607SetPressureOSR(OSR_4096);      // ~10ms conversion, highest resolution
+    MS5607SetTemperatureOSR(OSR_4096);
 
   /* USER CODE END 2 */
 
@@ -239,7 +112,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      HAL_Delay(1000);
+    if (baro_status == MS5607_STATE_READY) {
+
+        MS5607Update();   // triggers pressure + temperature conversion, blocks ~20ms at OSR_4096
+
+        int32_t pressure_pa = MS5607GetPressurePa();
+        double  temp_c      = MS5607GetTemperatureC();
+        float   pressure_hpa = (float)pressure_pa / 100.0f;
+
+        // Barometric altitude relative to sea level (ISA standard)
+        float altitude_m = 44330.0f * (1.0f - powf(pressure_hpa / 1013.25f, 1.0f / 5.255f));
+
+        printf("P: %ld Pa (%.2f hPa)  T: %.2f C  Alt: %.1f m\r\n",
+               pressure_pa, pressure_hpa, temp_c, altitude_m);
+    }
+
+    HAL_Delay(500);   // 2 Hz print rate — adjust as needed
   }
     /* USER CODE END WHILE */
 
@@ -256,10 +144,19 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
+  /** Supply configuration update enable
+  */
   HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
+
+  /** Configure the main internal regulator output voltage
+  */
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
+
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
   RCC_OscInitStruct.HSICalibrationValue = 64;
@@ -273,8 +170,13 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
   RCC_OscInitStruct.PLL.PLLFRACN = 0;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) { Error_Handler(); }
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
@@ -285,16 +187,27 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
   RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK) { Error_Handler(); }
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /* USER CODE BEGIN 4 */
 /* USER CODE END 4 */
 
+ /* MPU Configuration */
+
 void MPU_Config(void)
 {
   MPU_Region_InitTypeDef MPU_InitStruct = {0};
+
+  /* Disables the MPU */
   HAL_MPU_Disable();
+
+  /** Initializes and configures the Region and the memory to be protected
+  */
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
   MPU_InitStruct.Number = MPU_REGION_NUMBER0;
   MPU_InitStruct.BaseAddress = 0x0;
@@ -306,18 +219,40 @@ void MPU_Config(void)
   MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
   MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
+  /* Enables the MPU */
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+
 }
 
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1) {}
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
 }
-
 #ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
