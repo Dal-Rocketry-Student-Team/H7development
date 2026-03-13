@@ -8,7 +8,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "MS5607SPI.h"
 #include "spi.h"
+#include "stm32h7xx_hal_gpio.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -86,42 +88,40 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  printf("\r\n=== MS5607 PROM READ ===\r\n");
+  printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
 
-  printf("hspi1.State = %d (expect 1=Ready)\r\n", hspi1.State);
-    HAL_StatusTypeDef tx_rc;
-    uint8_t dummy = 0xAA;
-    HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-    tx_rc = HAL_SPI_Transmit(&hspi1, &dummy, 1, HAL_MAX_DELAY);
-    HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-    printf("TX test: HAL returned %d (0=OK, 1=Error, 2=Busy, 3=Timeout)\r\n", tx_rc);
-
-  /* Deselect everything */
+  /* Deselect everything on this spi bus */
   HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(ADX_NCS_GPIO_Port, ADX_NCS_Pin, GPIO_PIN_SET);
 
-  /* Reset MS5607 */
-  uint8_t cmd = 0x1E;
-  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-  HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-  HAL_Delay(5);
-
-  /* Read 8 PROM words */
-  for (int addr = 0; addr < 8; addr++) {
-      cmd = 0xA0 | (addr << 1);
-      uint8_t rx[2] = {0};
-
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
-      HAL_SPI_Receive(&hspi1, rx, 2, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
-
-      uint16_t val = ((uint16_t)rx[0] << 8) | rx[1];
-      printf("PROM[%d] = 0x%04X (%u)\r\n", addr, val, val);
+  /* Setup MS5607 */
+  MS5607StateTypeDef status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+  if (status == MS5607_STATE_FAILED) {
+    printf("Barometer init failed!\r\n");
   }
 
+  /* Read 8 PROM words */
+  struct promData promData;
+  MS5607PromRead(&promData);
+
+  printf("PROM Data:\r\n");
+  printf("C0 (Reserved): %u\r\n", promData.reserved);
+  printf("C1 (SENS): %u\r\n", promData.sens);
+  printf("C2 (OFF): %u\r\n", promData.off);
+  printf("C3 (TCS): %u\r\n", promData.tcs);
+  printf("C4 (TOS): %u\r\n", promData.tco);
+  printf("C5 (TREF): %u\r\n", promData.tref);
+  printf("C6 (TEMP): %u\r\n", promData.tempsens);
+  printf("C7 (CRC): %u\r\n", promData.crc);
+
   printf("=== DONE ===\r\n");
+
+  double temp_C = 0.0;
+  int32_t pressure_Pa = 0;
+
+  MS5607SetPressureOSR(OSR_4096);
+  MS5607SetTemperatureOSR(OSR_4096);
 
   /* USER CODE END 2 */
 
@@ -129,7 +129,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      HAL_Delay(1000);
+    MS5607Update();
+    temp_C = MS5607GetTemperatureC();
+    pressure_Pa = MS5607GetPressurePa();
+
+    printf("Temperature: %.2f C, Pressure: %d Pa\r\n", temp_C, pressure_Pa);
+
+    HAL_Delay(1000);
   }
     /* USER CODE END WHILE */
 
