@@ -2,17 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2025 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  * @brief          : Bare-minimum SX1262 SPI debug
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -28,12 +18,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-
-#include "lsm6dsv16x_reg.h" // LSM6DSV16X driver header file
-#include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
-
-#include "sx1262.h"        // SX1262 LoRa driver header file
-#include "sx1262_hal.h"     // SX1262 hardware abstraction header file
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,16 +27,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DEG2RAD 0.017453292519943295f // Pi / 180
-#define RAD2DEG 57.29577951308232f    // 180 / Pi
 
-/* ====== EDIT IF NEEDED ====== */
-#define SPI_HANDLE   hspi2                 // SPI instance wired to IMU
-#define CS_PORT      LSM_NCS_GPIO_Port     // IMU chip-select port
-#define CS_PIN       LSM_NCS_Pin           // IMU chip-select pin
-/* ============================ */
-#define REG_WHO_AM_I 0x0F
-#define SPI_READ_BIT 0x80
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,22 +38,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile uint8_t fusion_tick = 0;
 
-// --- Madgwick globals exposed by the library ---
-extern volatile float q0, q1, q2, q3;      // quaternion (from Madgwick)
-extern volatile float sampleFreq;          // Madgwick internal sample rate
-static float gyro_bias_dps[3] = {0};       // boot-time gyro bias estimate
-
-// There are 3 axes of data for both the accelerometer and gyroscope, each a 16 bit value
-int16_t accel_raw[3] = {0}, gyro_raw[3] = {0};
-float accel_g[3] = {0}, gyro_dps[3] = {0};
-
-// Making an instance of the ctx_t struct to use in accessing the lsm6dsv16x
-stmdev_ctx_t lsm6dsv16x_ctx;
-
-// data-ready flags to see if new data is available
-lsm6dsv16x_data_ready_t drdy;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -90,79 +50,28 @@ static void MPU_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/*
-================================
-PLATFORM COMMUNICATION FUNCTIONS
-================================
-*/
 
-int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp, uint16_t len)
-{
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_RESET);
-
-    uint8_t tx_buf[1] = { reg & 0x7F }; // Write operation
-    HAL_SPI_Transmit(handle, tx_buf, 1, HAL_MAX_DELAY);
-    HAL_SPI_Transmit(handle, (uint8_t*)bufp, len, HAL_MAX_DELAY);
-
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_SET);
-    return 0;
-}
-
-int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp, uint16_t len)
-{
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_RESET);
-
-    uint8_t tx_buf[1] = { reg | 0x80 }; // Read operation
-    HAL_SPI_Transmit(handle, tx_buf, 1, HAL_MAX_DELAY);
-    HAL_SPI_Receive(handle, bufp, len, HAL_MAX_DELAY);
-
-    HAL_GPIO_WritePin(LSM_NCS_GPIO_Port, LSM_NCS_Pin, GPIO_PIN_SET);
-    return 0;
-}
-
-// To redirect the printf to output to the UART instead so I can see it in putty
 int __io_putchar(int ch)
 {
     HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
     return ch;
 }
 
-static void IMU_Init_LSM6DSV16X(stmdev_ctx_t *ctx) {
-    uint8_t who = 0;
-
-    // 1) WHO_AM_I sanity
-    lsm6dsv16x_device_id_get(ctx, &who);
-
-    // 2) Reset (use one)
-    lsm6dsv16x_sw_reset(ctx);
-    HAL_Delay(10);
-
-    // 3) Force UI to SPI-only behavior (good hygiene)
-    lsm6dsv16x_ui_i2c_i3c_mode_set(ctx, LSM6DSV16X_I2C_I3C_DISABLE);
-    lsm6dsv16x_spi_mode_set(ctx, LSM6DSV16X_SPI_4_WIRE);
-
-    // 4) Safe defaults for multi-byte reads + coherence
-    lsm6dsv16x_auto_increment_set(ctx, 1);
-    lsm6dsv16x_block_data_update_set(ctx, 1);
-
-    // 5) Modes
-    lsm6dsv16x_xl_mode_set(ctx, LSM6DSV16X_XL_HIGH_PERFORMANCE_MD);
-    lsm6dsv16x_gy_mode_set(ctx, LSM6DSV16X_GY_HIGH_PERFORMANCE_MD);
-
-    // 6) Scales (rocket-safe defaults)
-    lsm6dsv16x_xl_full_scale_set(ctx, LSM6DSV16X_16g);
-    lsm6dsv16x_gy_full_scale_set(ctx, LSM6DSV16X_2000dps);
-
-    // 7) Filters (optional)
-    lsm6dsv16x_filt_xl_lp2_set(ctx, 1);
-    lsm6dsv16x_filt_gy_lp1_set(ctx, 1);
-
-    // 8) ODR ON (turns sensors on)
-    lsm6dsv16x_xl_data_rate_set(ctx, LSM6DSV16X_ODR_AT_240Hz);
-    lsm6dsv16x_gy_data_rate_set(ctx, LSM6DSV16X_ODR_AT_240Hz);
-
-    // Give it a moment to start producing samples
-    HAL_Delay(20);
+/* Bare SPI helper: send tx, receive rx, len bytes, with manual NSS */
+static HAL_StatusTypeDef SX_SPI(uint8_t *tx, uint8_t *rx, uint16_t len)
+{
+    /* Wait for BUSY to go low */
+    uint32_t t0 = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {
+        if (HAL_GetTick() - t0 > 100) {
+            printf("  !! BUSY stuck high\r\n");
+            return HAL_TIMEOUT;
+        }
+    }
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
+    HAL_StatusTypeDef rc = HAL_SPI_TransmitReceive(&hspi1, tx, rx, len, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+    return rc;
 }
 
 /* USER CODE END 0 */
@@ -207,232 +116,136 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
+  printf("\r\n\r\n====== SX1262 BARE MINIMUM DEBUG ======\r\n");
 
-  // Setup lsm6dsv16x_ctx correctly for this device setup
-  lsm6dsv16x_ctx.handle = &hspi2;
-  lsm6dsv16x_ctx.mdelay = HAL_Delay;
-  lsm6dsv16x_ctx.write_reg = platform_write;
-  lsm6dsv16x_ctx.read_reg = platform_read;
+  /* ---- Fix SPI1: disable NSSP, software NSS, slow clock ---- */
+  hspi1.Init.NSSPMode          = SPI_NSS_PULSE_DISABLE;
+  hspi1.Init.FifoThreshold     = SPI_FIFO_THRESHOLD_01DATA;
+  hspi1.Init.NSS               = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; /* 128/32 = 4 MHz */
+  if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+      printf("SPI1 init FAILED\r\n");
+      while(1) {}
+  }
+  printf("SPI1: NSSP=off, 4 MHz, NSS=soft\r\n");
 
-  IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
+  /* ---- Idle all control pins ---- */
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port,   E22_NCS_Pin,   GPIO_PIN_SET);
+  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port,  E22_TXEN_Pin,  GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(E22_RXEN_GPIO_Port,  E22_RXEN_Pin,  GPIO_PIN_RESET);
 
-  HAL_SPI_Init(&hspi1);
-
-    /* ===========================================================
-   * SPI1 DIAGNOSTIC — run BEFORE any SX1262 library calls
-   * Determines if reads are broken and where.
-   * =========================================================== */
-  printf("\r\n========== SPI1 DIAGNOSTIC ==========\r\n");
-
-  /* Manual hardware reset (known-good from your old code) */
-  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(E22_TXEN_GPIO_Port, E22_TXEN_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(E22_RXEN_GPIO_Port, E22_RXEN_Pin, GPIO_PIN_RESET);
-
+  /* ---- Hardware reset ---- */
+  printf("Resetting SX1262...\r\n");
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_RESET);
   HAL_Delay(10);
   HAL_GPIO_WritePin(E22_RESET_GPIO_Port, E22_RESET_Pin, GPIO_PIN_SET);
   HAL_Delay(100);
-  while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-  printf("Reset done, BUSY=0\r\n");
 
-  /* T1: GetStatus via TransmitReceive (same as library uses) */
+  /* Check BUSY cleared */
+  if (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {
+      printf("!! BUSY still HIGH after reset — chip may not be powered\r\n");
+  } else {
+      printf("BUSY=0 after reset (good)\r\n");
+  }
+
+  /* ---- GetStatus right after reset ---- */
+  printf("\r\n--- GetStatus after reset ---\r\n");
   {
       uint8_t tx[2] = {0xC0, 0x00};
       uint8_t rx[2] = {0xAA, 0xAA};
-
-      while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-      HAL_StatusTypeDef hal_rc = HAL_SPI_TransmitReceive(&hspi1, tx, rx, 2, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-      printf("T1 TransmitReceive: HAL=%d rx=0x%02X 0x%02X\r\n", hal_rc, rx[0], rx[1]);
-      if (rx[0] == 0xAA && rx[1] == 0xAA)
-          printf("   >> rx UNCHANGED — HAL never wrote to it\r\n");
-      else if (rx[0] == 0xFF && rx[1] == 0xFF)
-          printf("   >> All 0xFF — MISO stuck high or wrong AF\r\n");
-      else
-          printf("   >> Got data! Status=0x%02X\r\n", rx[1]);
-  }
-  HAL_Delay(2);
-
-  /* T2: GetStatus via separate Transmit + Receive */
-  {
-      uint8_t opcode = 0xC0;
-      uint8_t status = 0xAA;
-
-      while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_Transmit(&hspi1, &opcode, 1, HAL_MAX_DELAY);
-      HAL_SPI_Receive(&hspi1, &status, 1, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-      printf("T2 Split TX+RX: status=0x%02X\r\n", status);
-      if (status == 0xFF)
-          printf("   >> 0xFF again — likely HW: MISO pin, AF, or wiring\r\n");
-      else if (status == 0xAA)
-          printf("   >> Unchanged — HAL_SPI_Receive not working\r\n");
-      else
-          printf("   >> Got data! Split TX/RX works.\r\n");
-  }
-  HAL_Delay(2);
-
-  /* T3: Dump SPI1 peripheral config */
-  {
-      printf("T3 SPI1 config:\r\n");
-      printf("   Mode       = 0x%08lX\r\n", (unsigned long)hspi1.Init.Mode);
-      printf("   DataSize   = 0x%08lX\r\n", (unsigned long)hspi1.Init.DataSize);
-      printf("   CLKPolarity= %lu (0=CPOL0)\r\n", (unsigned long)hspi1.Init.CLKPolarity);
-      printf("   CLKPhase   = %lu (0=CPHA0)\r\n", (unsigned long)hspi1.Init.CLKPhase);
-      printf("   NSSPMode   = 0x%08lX\r\n", (unsigned long)hspi1.Init.NSSPMode);
-      printf("   BaudPre    = 0x%08lX\r\n", (unsigned long)hspi1.Init.BaudRatePrescaler);
-      printf("   FifoThresh = 0x%08lX\r\n", (unsigned long)hspi1.Init.FifoThreshold);
-      printf("   State      = %d (1=Ready)\r\n", hspi1.State);
-  }
-
-  /* T4: BUSY pin */
-  printf("T4 BUSY=%d (expect 0)\r\n",
-         HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
-
-  /* T5: ReadRegister(0x0740) raw after reset */
-  {
-      uint8_t tx[6] = {0x1D, 0x07, 0x40, 0x00, 0x00, 0x00};
-      uint8_t rx[6] = {0};
-
-      while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_TransmitReceive(&hspi1, tx, rx, 6, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-      printf("T5 ReadReg raw: ");
-      for (int i = 0; i < 6; i++) printf("%02X ", rx[i]);
+      HAL_StatusTypeDef rc = SX_SPI(tx, rx, 2);
+      printf("HAL=%d  rx: 0x%02X 0x%02X\r\n", rc, rx[0], rx[1]);
+      printf("  Status byte = 0x%02X\r\n", rx[1]);
+      uint8_t mode = (rx[1] >> 4) & 0x7;
+      uint8_t cmd  = (rx[1] >> 1) & 0x7;
+      printf("  Chip mode = %d ", mode);
+      switch(mode) {
+          case 2: printf("(STDBY_RC)"); break;
+          case 3: printf("(STDBY_XOSC)"); break;
+          case 4: printf("(FS)"); break;
+          case 5: printf("(RX)"); break;
+          case 6: printf("(TX)"); break;
+          default: printf("(UNKNOWN)"); break;
+      }
+      printf("\r\n  Cmd status = %d ", cmd);
+      switch(cmd) {
+          case 2: printf("(data available)"); break;
+          case 3: printf("(cmd timeout)"); break;
+          case 4: printf("(cmd error)"); break;
+          case 5: printf("(exec failure)"); break;
+          case 6: printf("(TX done)"); break;
+          default: printf("(reserved)"); break;
+      }
       printf("\r\n");
-  }
 
-  /* T6: Write 0xAB to reg 0x0740, then read back */
-  {
-      uint8_t tx_w[4] = {0x0D, 0x07, 0x40, 0xAB};
-      uint8_t rx_w[4] = {0};
-      while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_TransmitReceive(&hspi1, tx_w, rx_w, 4, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-      HAL_Delay(2);
-
-      uint8_t tx_r[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
-      uint8_t rx_r[5] = {0};
-      while (HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin) == GPIO_PIN_SET) {}
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_RESET);
-      HAL_SPI_TransmitReceive(&hspi1, tx_r, rx_r, 5, HAL_MAX_DELAY);
-      HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
-
-      printf("T6 Write 0xAB, ReadBack: 0x%02X (expect 0xAB)\r\n", rx_r[4]);
-      if (rx_r[4] == 0xAB)
-          printf("   >> ROUND-TRIP CONFIRMED — reads work!\r\n");
-      else if (rx_r[4] == 0xFF)
-          printf("   >> 0xFF — writes work (CW proves it), reads broken\r\n");
+      if (rx[0] == 0xAA && rx[1] == 0xAA)
+          printf("  >> FAIL: rx buffer untouched by HAL\r\n");
+      else if (rx[0] == 0x00 && rx[1] == 0x00)
+          printf("  >> SUSPECT: all zeros — chip may not be responding\r\n");
+      else if (mode == 2)
+          printf("  >> OK: chip is in STDBY_RC as expected after reset\r\n");
       else
-          printf("   >> 0x%02X — unexpected value\r\n", rx_r[4]);
+          printf("  >> UNEXPECTED: chip should be STDBY_RC after reset\r\n");
   }
 
-  printf("========== END DIAGNOSTIC ==========\r\n\r\n");
-
-  printf("\r\n=== SX1262 Continuous TX Bring-Up ===\r\n");
-
-  /* --------------------------------------------------------
-   * Step 0: Full hardware + chip init (reset, TCXO, cal, DC-DC)
-   * This follows section 14.2 pre-requisites.
-   * -------------------------------------------------------- */
-  int rc = SX1262_Init();
-  printf("SX1262_Init: %s (errors=0x%04X)\r\n",
-         rc == 0 ? "OK" : "FAIL", SX1262_GetDeviceErrors());
-
-  /* --------------------------------------------------------
-   * Step 1-5 (Section 14.2): Configure LoRa radio
-   *   1. SetStandby(STDBY_RC)          — done inside ConfigureLora
-   *   2. SetPacketType(LoRa)           — done inside ConfigureLora
-   *   3. SetRfFrequency(915 MHz)       — done inside ConfigureLora
-   *      + CalibrateImage(902-928 MHz) — done inside ConfigureLora
-   *   4. SetPaConfig(+22 dBm SX1262)   — done inside ConfigureLora
-   *   5. SetTxParams(+22 dBm, 200us)   — done inside ConfigureLora
-   *   + SetModulationParams, SetPacketParams, SyncWord, IRQs
-   * -------------------------------------------------------- */
-  sx1262_lora_mod_t mod = {
-      .sf   = SX1262_LORA_SF9,
-      .bw   = SX1262_LORA_BW_125K,
-      .cr   = SX1262_LORA_CR_4_5,
-      .ldro = false,
-  };
-
-  uint8_t payload[] = "HELLO_LORA_ROCKET";
-  uint8_t payload_len = sizeof(payload) - 1;  /* 17 bytes */
-
-  sx1262_lora_pkt_t pkt = {
-      .preamble_len = 12,
-      .fixed_length = false,   /* explicit header */
-      .payload_len  = payload_len,
-      .crc_on       = true,
-      .invert_iq    = false,
-  };
-
-  SX1262_ConfigureLora(915000000UL, &mod, &pkt);
-  printf("Radio configured: 915 MHz, SF9, BW125K, CR4/5, +22 dBm\r\n");
-
-  /* Quick sanity: read back sync word */
+  /* ---- SetStandby(STDBY_RC) then GetStatus ---- */
+  printf("\r\n--- SetStandby(STDBY_RC) then GetStatus ---\r\n");
   {
-      uint8_t sw[2] = {0};
-      SX1262_ReadRegister(SX1262_REG_LORA_SYNC_WORD_MSB, sw, 2);
-      printf("Sync word readback: 0x%02X%02X (expect 0x1424)\r\n", sw[0], sw[1]);
+      uint8_t tx[2] = {0x80, 0x00};
+      uint8_t rx[2] = {0};
+      SX_SPI(tx, rx, 2);
+      printf("  During cmd: 0x%02X 0x%02X\r\n", rx[0], rx[1]);
   }
-
-  /* Check device errors before transmitting */
+  HAL_Delay(5);
   {
-      uint16_t errs = SX1262_GetDeviceErrors();
-      printf("Device errors pre-TX: 0x%04X %s\r\n", errs,
-             errs == 0 ? "(clean)" : "(WARNING)");
-      if (errs) SX1262_ClearDeviceErrors();
+      uint8_t tx[2] = {0xC0, 0x00};
+      uint8_t rx[2] = {0};
+      SX_SPI(tx, rx, 2);
+      printf("  GetStatus:  0x%02X -> mode=%d cmd=%d\r\n",
+             rx[1], (rx[1]>>4)&0x7, (rx[1]>>1)&0x7);
   }
 
-  #define TX_MODE  0  /*0 = CW tone (easiest to see in SDR Sharp)
-                        1 = continuous LoRa packets
-                        2 = infinite LoRa preamble */
+  /* ---- GetDeviceErrors ---- */
+  printf("\r\n--- GetDeviceErrors ---\r\n");
+  {
+      uint8_t tx[4] = {0x17, 0x00, 0x00, 0x00};
+      uint8_t rx[4] = {0};
+      SX_SPI(tx, rx, 4);
+      uint16_t errs = ((uint16_t)rx[2] << 8) | rx[3];
+      printf("  Raw: %02X %02X %02X %02X -> errors=0x%04X\r\n",
+             rx[0], rx[1], rx[2], rx[3], errs);
+  }
 
-  #if TX_MODE == 0
-    /* ======== CW TONE MODE ========
-    * Emits an unmodulated carrier at 915 MHz.
-    * In SDR Sharp you'll see a single spike at 915.000 MHz.
-    * Great for verifying the RF path works at all.
-    */
-    printf("Starting CW tone at 915 MHz...\r\n");
-    SX1262_SetStandby(SX1262_STDBY_RC);
-    SX1262_SetPacketType(SX1262_PACKET_TYPE_LORA);
-    SX1262_SetRfFrequency(915000000UL);
-    SX1262_SetPaConfig(0x04, 0x07, 0x00);
-    SX1262_SetTxParams(22, SX1262_RAMP_200_US);
-    SX1262_SetTxContinuousWave();
-    printf("CW active — check SDR Sharp at 915 MHz\r\n");
-    /* CW stays on indefinitely — loop does nothing */
+  /* ---- Register round-trip: write 0xAB to 0x0740, read back ---- */
+  printf("\r\n--- Register round-trip (0xAB -> 0x0740) ---\r\n");
+  {
+      /* Set LoRa packet type first so 0x0740 is accessible */
+      uint8_t tx[2] = {0x8A, 0x01};
+      uint8_t rx[2] = {0};
+      SX_SPI(tx, rx, 2);
+  }
+  HAL_Delay(2);
+  {
+      uint8_t tx[4] = {0x0D, 0x07, 0x40, 0xAB};
+      uint8_t rx[4] = {0};
+      SX_SPI(tx, rx, 4);
+  }
+  HAL_Delay(2);
+  {
+      uint8_t tx[5] = {0x1D, 0x07, 0x40, 0x00, 0x00};
+      uint8_t rx[5] = {0};
+      SX_SPI(tx, rx, 5);
+      printf("  Read: %02X %02X %02X %02X [%02X]\r\n",
+             rx[0], rx[1], rx[2], rx[3], rx[4]);
+      printf("  Data = 0x%02X (expect 0xAB)\r\n", rx[4]);
+      if (rx[4] == 0xAB)
+          printf("  >> PASS\r\n");
+      else
+          printf("  >> FAIL\r\n");
+  }
 
-  #elif TX_MODE == 1
-    /* ======== CONTINUOUS LORA PACKET MODE ========
-    * Sends packets in a loop with a short delay between them.
-    * In SDR Sharp you'll see periodic chirp bursts around 915 MHz.
-    */
-    printf("Starting continuous LoRa TX...\r\n");
+  printf("\r\n====== POLLING GetStatus every 1s ======\r\n\r\n");
 
-  #elif TX_MODE == 2
-    /* ======== INFINITE PREAMBLE MODE ========
-    * Emits a continuous LoRa preamble (repeating upchirps).
-    * In SDR Sharp you'll see a steady stream of chirps.
-    */
-    printf("Starting infinite preamble at 915 MHz...\r\n");
-    SX1262_SetTxInfinitePreamble();
-    printf("Preamble active — check SDR Sharp at 915 MHz\r\n");
-
-  #endif
-    
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -440,23 +253,13 @@ int main(void)
 
   while (1)
   {
-    #if TX_MODE == 1
-      int tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
-      static uint32_t pkt_count = 0;
-      pkt_count++;
-      if (tx_rc == 0) {
-          printf("TX #%lu OK\r\n", pkt_count);
-      } else {
-          printf("TX #%lu FAIL (rc=%d, err=0x%04X)\r\n",
-                 pkt_count, tx_rc, SX1262_GetDeviceErrors());
-          /* Try to recover */
-          SX1262_ClearDeviceErrors();
-          SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-          SX1262_SetStandby(SX1262_STDBY_RC);
-          HAL_Delay(100);
-      }
-      HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
-    #endif
+      uint8_t tx[2] = {0xC0, 0x00};
+      uint8_t rx[2] = {0};
+      SX_SPI(tx, rx, 2);
+      printf("Status=0x%02X  mode=%d cmd=%d  BUSY=%d\r\n",
+             rx[1], (rx[1]>>4)&0x7, (rx[1]>>1)&0x7,
+             HAL_GPIO_ReadPin(E22_BUSY_GPIO_Port, E22_BUSY_Pin));
+      HAL_Delay(1000);
   }
 
     /* USER CODE END WHILE */
