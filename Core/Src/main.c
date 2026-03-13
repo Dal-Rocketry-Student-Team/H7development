@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : SPI1 bus test using MS5607 barometer
+  * @brief          : MS5607 PROM read — nothing else
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -16,9 +16,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
-#include <stdint.h>
-
-#include "MS5607SPI.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,7 +37,6 @@
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
 
@@ -65,21 +61,20 @@ int main(void)
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 
-  /* MPU Configuration--------------------------------------------------------*/
-  MPU_Config();
-
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -91,20 +86,42 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  /* ---- MS5607 Barometer Init ---- */
-    printf("\r\n=== MS5607 BAROMETER TEST ===\r\n");
+  printf("\r\n=== MS5607 PROM READ ===\r\n");
 
-    MS5607StateTypeDef baro_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+  printf("hspi1.State = %d (expect 1=Ready)\r\n", hspi1.State);
+    HAL_StatusTypeDef tx_rc;
+    uint8_t dummy = 0xAA;
+    HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
+    tx_rc = HAL_SPI_Transmit(&hspi1, &dummy, 1, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
+    printf("TX test: HAL returned %d (0=OK, 1=Error, 2=Busy, 3=Timeout)\r\n", tx_rc);
 
-    if (baro_status == MS5607_STATE_READY) {
-        printf("MS5607 init OK - PROM read successful\r\n");
-    } else {
-        printf("MS5607 init FAILED - check wiring and CS pin\r\n");
-    }
+  /* Deselect everything */
+  HAL_GPIO_WritePin(E22_NCS_GPIO_Port, E22_NCS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
 
-    // Optional: bump OSR for better resolution (default is OSR_256)
-    MS5607SetPressureOSR(OSR_4096);      // ~10ms conversion, highest resolution
-    MS5607SetTemperatureOSR(OSR_4096);
+  /* Reset MS5607 */
+  uint8_t cmd = 0x1E;
+  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
+  HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
+  HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
+  HAL_Delay(5);
+
+  /* Read 8 PROM words */
+  for (int addr = 0; addr < 8; addr++) {
+      cmd = 0xA0 | (addr << 1);
+      uint8_t rx[2] = {0};
+
+      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_RESET);
+      HAL_SPI_Transmit(&hspi1, &cmd, 1, HAL_MAX_DELAY);
+      HAL_SPI_Receive(&hspi1, rx, 2, HAL_MAX_DELAY);
+      HAL_GPIO_WritePin(MS5_NCS_GPIO_Port, MS5_NCS_Pin, GPIO_PIN_SET);
+
+      uint16_t val = ((uint16_t)rx[0] << 8) | rx[1];
+      printf("PROM[%d] = 0x%04X (%u)\r\n", addr, val, val);
+  }
+
+  printf("=== DONE ===\r\n");
 
   /* USER CODE END 2 */
 
@@ -112,22 +129,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    if (baro_status == MS5607_STATE_READY) {
-
-        MS5607Update();   // triggers pressure + temperature conversion, blocks ~20ms at OSR_4096
-
-        int32_t pressure_pa = MS5607GetPressurePa();
-        double  temp_c      = MS5607GetTemperatureC();
-        float   pressure_hpa = (float)pressure_pa / 100.0f;
-
-        // Barometric altitude relative to sea level (ISA standard)
-        float altitude_m = 44330.0f * (1.0f - powf(pressure_hpa / 1013.25f, 1.0f / 5.255f));
-
-        printf("P: %ld Pa (%.2f hPa)  T: %.2f C  Alt: %.1f m\r\n",
-               pressure_pa, pressure_hpa, temp_c, altitude_m);
-    }
-
-    HAL_Delay(500);   // 2 Hz print rate — adjust as needed
+      HAL_Delay(1000);
   }
     /* USER CODE END WHILE */
 
@@ -150,7 +152,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
@@ -163,9 +165,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 32;
+  RCC_OscInitStruct.PLL.PLLN = 12;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLQ = 3;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -180,51 +182,23 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
   RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /* USER CODE BEGIN 4 */
+
 /* USER CODE END 4 */
-
- /* MPU Configuration */
-
-void MPU_Config(void)
-{
-  MPU_Region_InitTypeDef MPU_InitStruct = {0};
-
-  /* Disables the MPU */
-  HAL_MPU_Disable();
-
-  /** Initializes and configures the Region and the memory to be protected
-  */
-  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
-  MPU_InitStruct.BaseAddress = 0x0;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_4GB;
-  MPU_InitStruct.SubRegionDisable = 0x87;
-  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
-  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
-  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
-
-  HAL_MPU_ConfigRegion(&MPU_InitStruct);
-  /* Enables the MPU */
-  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-
-}
 
 /**
   * @brief  This function is executed in case of error occurrence.

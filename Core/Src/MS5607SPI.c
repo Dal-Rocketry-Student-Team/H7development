@@ -89,7 +89,7 @@ void MS5607PromRead(struct promData *prom){
     enableCSB();
     HAL_SPI_Transmit(hspi, &SPITransmitData, 1, 10);
     /* Receive two bytes at once and stores it directly at the structure */
-    HAL_SPI_Receive(hspi, structPointer, 2, 10);
+    HAL_SPI_Receive(hspi, (uint8_t *)structPointer, 2, 10);
     disableCSB();
     structPointer++;
   }
