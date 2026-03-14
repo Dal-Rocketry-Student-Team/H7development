@@ -396,7 +396,7 @@ int main(void)
   while (1)
   {
     #if TX_MODE == 1
-      tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
+      tx_rc = SX1262_TransmitLora(payload, payload_len, 1000);
       pkt_count++;
       if (tx_rc == 0) {
           printf("TX #%lu OK\r\n", pkt_count);
