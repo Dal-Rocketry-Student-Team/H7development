@@ -220,7 +220,7 @@ int main(void)
 
   /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
   static uint32_t rx_pkt_count = 0;
-  uint8_t rx_buf[256] = {0};
+  uint8_t rx_buf[255] = {0};      // SX1262 max payload is 255 bytes
   uint8_t rx_len = 17;
   int rx_rc = 0;
   uint8_t i = 0;
@@ -436,7 +436,7 @@ int main(void)
        */
 
       /* Block waiting for a packet (5 second timeout per attempt) */
-      rx_rc = SX1262_ReceiveLora(rx_buf, 256, &rx_len, 5000);
+      rx_rc = SX1262_ReceiveLora(rx_buf, sizeof(rx_buf), &rx_len, 1000);
 
       if (rx_rc == 0) {
           /* ===== PACKET SUCCESSFULLY RECEIVED ===== */
