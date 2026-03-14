@@ -221,7 +221,7 @@ int main(void)
   /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
   static uint32_t rx_pkt_count = 0;
   uint8_t rx_buf[255] = {0};      // SX1262 max payload is 255 bytes
-  uint8_t rx_len = 17;
+  uint8_t rx_len = 0;
   int rx_rc = 0;
   uint8_t i = 0;
   uint8_t raw_plen = 0, raw_ptr = 0;
@@ -461,18 +461,10 @@ int main(void)
               for (i = 0; i < rx_len; i++) {
                   printf("%02X ", rx_buf[i]);
               }
-              printf("SX1262 err code after RX len VALID: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
-              {
-                uint8_t status = SX1262_GetStatus();
-                sx1262_status_t decoded;
-                SX1262_DecodeStatus(status, &decoded);
-                printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
-              }
 
           } else {
               printf("  WARNING: rx_len is 0, but raw_plen=%u from hardware!\r\n", raw_plen);
-              printf("SX1262 err code after RX len 0 detected: 0x%04X\r\n", SX1262_GetDeviceErrors());
+              printf("  SX1262 err code after RX len 0 detected: 0x%04X\r\n", SX1262_GetDeviceErrors());
   
               {
                 uint8_t status = SX1262_GetStatus();
@@ -486,7 +478,7 @@ int main(void)
           /* Timeout: no packet received within timeout */
           printf(".");
           fflush(stdout);
-          printf("SX1262 err code after RX TIMEOUT: 0x%04X\r\n", SX1262_GetDeviceErrors());
+          printf("  SX1262 err code after RX TIMEOUT: 0x%04X\r\n", SX1262_GetDeviceErrors());
   
           {
             uint8_t status = SX1262_GetStatus();
@@ -497,7 +489,7 @@ int main(void)
 
       } else if (rx_rc == -2) {
           /* CRC error or other error */
-          printf("[RX Error] Error (rc=%d, err=0x%04X)\r\n", rx_rc, SX1262_GetDeviceErrors());
+          printf("  [RX Error] Error (rc=%d, err=0x%04X)\r\n", rx_rc, SX1262_GetDeviceErrors());
           {
             uint8_t status = SX1262_GetStatus();
             sx1262_status_t decoded;

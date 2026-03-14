@@ -463,9 +463,6 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
             uint8_t pl, rs;
             SX1262_GetRxBufferStatus(&pl, &rs);
             
-            /* DEBUG: Log what we read from hardware */
-            printf("[ReceiveLora] IRQ_RX_DONE: pl=%u, rs=%u, buf_size=%u\r\n", pl, rs, buf_size);
-            
             /* Now clear IRQ and disable TX/RX */
             SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
             SX1262_HW_SetTxEn(0); 
@@ -478,13 +475,6 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
                 return -2; 
             }
             
-            /* Read packet from FIFO */
-            if (pl > buf_size) pl = buf_size;
-            printf("[ReceiveLora] About to read %u bytes from offset %u\r\n", pl, rs);
-            SX1262_ReadBuffer(rs, buf, pl);
-            printf("[ReceiveLora] Read complete, setting *rx_len to %u\r\n", pl);
-            *rx_len = pl;
-            printf("[ReceiveLora] After assignment: *rx_len=%u\r\n", *rx_len);
             return 0;
         }
         if (irq & SX1262_IRQ_TIMEOUT) {
