@@ -223,6 +223,34 @@ typedef struct {
     int16_t  signal_rssi; /**< Signal RSSI after despreading */
 } sx1262_pkt_status_t;
 
+/** Command status (bits 3:1 of status byte) */
+typedef enum {
+    SX1262_CMD_STATUS_RESERVED = 0x00,
+    SX1262_CMD_STATUS_RFU      = 0x01,        /**< Reserved for future use */
+    SX1262_CMD_STATUS_DATA_AVAILABLE = 0x02, /**< Data available for host */
+    SX1262_CMD_STATUS_TIMEOUT  = 0x03,        /**< Command timeout */
+    SX1262_CMD_STATUS_PROCESSING_ERR = 0x04, /**< Command processing error */
+    SX1262_CMD_STATUS_EXEC_FAILURE = 0x05,   /**< Failure to execute command */
+    SX1262_CMD_STATUS_TX_DONE  = 0x06,        /**< Command TX done */
+} sx1262_cmd_status_t;
+
+/** Chip mode (bits 6:4 of status byte) */
+typedef enum {
+    SX1262_CHIP_MODE_UNUSED    = 0x00,
+    SX1262_CHIP_MODE_RFU       = 0x01,        /**< Reserved for future use */
+    SX1262_CHIP_MODE_STDBY_RC  = 0x02,        /**< Standby with RC oscillator */
+    SX1262_CHIP_MODE_STDBY_XOSC = 0x03,       /**< Standby with XOSC */
+    SX1262_CHIP_MODE_FS        = 0x04,        /**< Frequency synthesizer on */
+    SX1262_CHIP_MODE_RX        = 0x05,        /**< RX mode */
+    SX1262_CHIP_MODE_TX        = 0x06,        /**< TX mode */
+} sx1262_chip_mode_t;
+
+/** Decoded status byte */
+typedef struct {
+    sx1262_cmd_status_t  cmd_status;   /**< Command status (bits 3:1) */
+    sx1262_chip_mode_t   chip_mode;    /**< Chip mode (bits 6:4) */
+} sx1262_status_t;
+
 /* ===================================================================
  * Driver API
  * =================================================================== */
@@ -295,6 +323,7 @@ void SX1262_CalibrateImage(uint8_t freq1, uint8_t freq2);
 /* --- Status / diagnostics --- */
 
 uint8_t  SX1262_GetStatus(void);
+void     SX1262_DecodeStatus(uint8_t status_byte, sx1262_status_t *decoded);
 void     SX1262_GetRxBufferStatus(uint8_t *payload_len, uint8_t *rx_start_ptr);
 void     SX1262_GetPacketStatus(sx1262_pkt_status_t *status);
 int16_t  SX1262_GetRssiInst(void);

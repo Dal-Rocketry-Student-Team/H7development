@@ -297,6 +297,16 @@ uint8_t SX1262_GetStatus(void) {
     return s;
 }
 
+void SX1262_DecodeStatus(uint8_t status_byte, sx1262_status_t *decoded) {
+    if (decoded == NULL) return;
+    
+    /* Extract command status from bits 3:1 */
+    decoded->cmd_status = (sx1262_cmd_status_t)((status_byte >> 1) & 0x07);
+    
+    /* Extract chip mode from bits 6:4 */
+    decoded->chip_mode = (sx1262_chip_mode_t)((status_byte >> 4) & 0x07);
+}
+
 void SX1262_GetRxBufferStatus(uint8_t *plen, uint8_t *ptr) {
     uint8_t b[2]={0};
     SX1262_ReadCommand(SX1262_CMD_GET_RX_BUFFER_STATUS, b, 2);

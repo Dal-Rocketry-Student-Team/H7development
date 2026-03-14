@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
+#include "stm32h7xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -223,9 +224,51 @@ int main(void)
    * Step 0: Full hardware + chip init (reset, TCXO, cal, DC-DC)
    * This follows section 14.2 pre-requisites.
    * -------------------------------------------------------- */
-  int rc = SX1262_Init();
-  printf("SX1262_Init: %s (errors=0x%04X)\r\n",
-         rc == 0 ? "OK" : "FAIL", SX1262_GetDeviceErrors());
+
+  SX1262_HW_Init();
+  printf("SX1262 err code after HW INIT: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  SX1262_ClearDeviceErrors();
+
+  {
+    uint8_t status = SX1262_GetStatus();
+    sx1262_status_t decoded;
+    SX1262_DecodeStatus(status, &decoded);
+    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+  }
+  
+  SX1262_SetStandby(SX1262_STDBY_RC);
+  printf("SX1262 err code after first SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
+
+  // SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
+  // HAL_Delay(2);
+  // printf("SX1262 err code after SET DIO3 AS TCXO CONTROL: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+  // SX1262_HW_DelayMs(15);
+  // printf("SX1262 err code after 15 ms delay: 0x%04X\r\n", SX1262_GetDeviceErrors());
+
+  // SX1262_SetStandby(SX1262_STDBY_XOSC);
+  // printf("SX1262 err code after STANDBY XOSC: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+  {
+    uint8_t status = SX1262_GetStatus();
+    sx1262_status_t decoded;
+    SX1262_DecodeStatus(status, &decoded);
+    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+  }
+
+  SX1262_SetStandby(SX1262_STDBY_RC);
+  printf("SX1262 err code after second SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+  {
+    uint8_t status = SX1262_GetStatus();
+    sx1262_status_t decoded;
+    SX1262_DecodeStatus(status, &decoded);
+    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+  }
+  
+  // SX1262_Calibrate(0x7F);
+  // printf("SX1262 err code after calibration: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  SX1262_HW_DelayMs(5);
 
   /* --------------------------------------------------------
    * Step 1-5 (Section 14.2): Configure LoRa radio
@@ -257,6 +300,15 @@ int main(void)
 
   SX1262_ConfigureLora(915000000UL, &mod, &pkt);
   printf("Radio configured: 915 MHz, SF9, BW125K, CR4/5, +22 dBm\r\n");
+  
+  printf("SX1262 err code after CONFIGURE LORA: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+  {
+    uint8_t status = SX1262_GetStatus();
+    sx1262_status_t decoded;
+    SX1262_DecodeStatus(status, &decoded);
+    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+  }
 
   /* Quick sanity: read back sync word */
   {
@@ -273,9 +325,15 @@ int main(void)
       if (errs) SX1262_ClearDeviceErrors();
   }
 
+  /* ==================== SELECT RADIO MODE ==================== */
+
   #define TX_MODE  1  /*0 = CW tone (easiest to see in SDR Sharp)
                         1 = continuous LoRa packets
-                        2 = infinite LoRa preamble */
+                        2 = infinite LoRa preamble
+                        3 = CAD mode (RX-ONLY)
+                        4 = Radio disabled */
+
+  /* ==================== SELECT RADIO MODE ==================== */
 
   #if TX_MODE == 0
     /* ======== CW TONE MODE ========
@@ -298,6 +356,9 @@ int main(void)
     * Sends packets in a loop with a short delay between them.
     * In SDR Sharp you'll see periodic chirp bursts around 915 MHz.
     */
+    int tx_rc = 0;
+    static uint32_t pkt_count = 0;
+
     printf("Starting continuous LoRa TX...\r\n");
 
   #elif TX_MODE == 2
@@ -309,9 +370,23 @@ int main(void)
     SX1262_SetTxInfinitePreamble();
     printf("Preamble active — check SDR Sharp at 915 MHz\r\n");
 
-  #endif
+  #elif TX_MODE == 3
+    /* ======== CAD MODE (RX-ONLY) ========
+    * Continuously performs Channel Activity Detection (CAD) at 915 MHz.
+    * In SDR Sharp you'll see periodic short bursts as the radio briefly
+      turns on its receiver to listen for activity, then goes back to sleep.
+    */
+    printf("Starting continuous CAD mode at 915 MHz...\r\n");
+    SX1262_SetCad();
+    printf("CAD active — check SDR Sharp at 915 MHz\r\n");
+    /* CAD stays on indefinitely — loop does nothing */
 
-  int tx_rc = 0;
+  #elif TX_MODE == 4
+    /* ======== RADIO OFF MODE ======== */
+    printf("Turning radio off...\r\n");
+    SX1262_SetStandby(SX1262_STDBY_RC);
+
+  #endif
     
   /* USER CODE END 2 */
 
@@ -322,7 +397,6 @@ int main(void)
   {
     #if TX_MODE == 1
       tx_rc = SX1262_TransmitLora(payload, payload_len, 5000);
-      static uint32_t pkt_count = 0;
       pkt_count++;
       if (tx_rc == 0) {
           printf("TX #%lu OK\r\n", pkt_count);
