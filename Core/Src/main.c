@@ -327,11 +327,12 @@ int main(void)
 
   /* ==================== SELECT RADIO MODE ==================== */
 
-  #define TX_MODE  1  /*0 = CW tone (easiest to see in SDR Sharp)
-                        1 = continuous LoRa packets
+  #define TX_MODE  5  /*0 = CW tone (easiest to see in SDR Sharp)
+                        1 = continuous LoRa packets (TX)
                         2 = infinite LoRa preamble
-                        3 = CAD mode (RX-ONLY)
-                        4 = Radio disabled */
+                        3 = CAD mode (RX-ONLY, periodic activity detection)
+                        4 = Radio disabled
+                        5 = Continuous RX mode (GROUND STATION) */
 
   /* ==================== SELECT RADIO MODE ==================== */
 
@@ -386,6 +387,22 @@ int main(void)
     printf("Turning radio off...\r\n");
     SX1262_SetStandby(SX1262_STDBY_RC);
 
+  #elif TX_MODE == 5
+    /* ======== CONTINUOUS RX MODE (GROUND STATION) ========
+    * Continuously listens for incoming LoRa packets at 915 MHz.
+    * Prints packet contents, signal strength (RSSI/SNR), and CRC status.
+    * Timeout set to 0 = continuous reception mode.
+    */
+    printf("Starting continuous RX mode at 915 MHz...\r\n");
+    printf("Waiting for LoRa packets (SF9, BW125K, private sync word)...\r\n");
+
+    static uint32_t rx_pkt_count = 0;
+    uint8_t rx_buf[256];
+    uint8_t rx_len = 0;
+    int rx_rc = 0;
+
+    /* RX loop waits below */
+
   #endif
     
   /* USER CODE END 2 */
@@ -410,6 +427,49 @@ int main(void)
           HAL_Delay(100);
       }
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
+    #elif TX_MODE == 5
+      /* ======== CONTINUOUS RX LOOP ========
+       * Wait for incoming packets with 5-second timeout per packet.
+       * If no packet received within timeout, re-enter RX mode.
+       */
+
+      /* Block waiting for a packet (5 second timeout per attempt) */
+      rx_rc = SX1262_ReceiveLora(rx_buf, sizeof(rx_buf), &rx_len, 5000);
+
+      if (rx_rc == 0) {
+          /* ===== PACKET SUCCESSFULLY RECEIVED ===== */
+          rx_pkt_count++;
+          sx1262_pkt_status_t pkt_status;
+          SX1262_GetPacketStatus(&pkt_status);
+
+          printf("\r\n[RX #%lu] Packet received! Length: %u bytes\r\n",
+                 rx_pkt_count, rx_len);
+          printf("  Signal: RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
+                 pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
+          printf("  Payload: ");
+          for (uint8_t i = 0; i < rx_len; i++) {
+              printf("%c", (rx_buf[i] >= 32 && rx_buf[i] <= 126) ? rx_buf[i] : '.');
+          }
+          printf("\r\n");
+          printf("  Hex: ");
+          for (uint8_t i = 0; i < rx_len; i++) {
+              printf("%02X ", rx_buf[i]);
+          }
+          printf("\r\n");
+
+      } else if (rx_rc == -1) {
+          /* Timeout: no packet received within 5 seconds */
+          printf(".");  /* Quiet indicator - just show we're still waiting */
+          fflush(stdout);
+
+      } else if (rx_rc == -2) {
+          /* CRC error or other error */
+          printf("[RX Error] CRC failure or device error (rc=%d, err=0x%04X)\r\n",
+                 rx_rc, SX1262_GetDeviceErrors());
+          SX1262_ClearDeviceErrors();
+          SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
+          HAL_Delay(100);  /* Brief pause before retrying */
+      }
     #endif
   }
 
