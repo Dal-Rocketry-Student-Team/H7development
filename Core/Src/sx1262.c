@@ -470,11 +470,16 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
             
             /* Check CRC error after reading buffer status */
             if (irq & SX1262_IRQ_CRC_ERR) { 
-                printf("[ReceiveLora] CRC ERROR detected!\r\n");
+                printf("\r\n\n[ReceiveLora] CRC ERROR detected!\r\n");
                 *rx_len = 0; 
                 return -2; 
             }
             
+            /* Read packet from FIFO */
+            if (pl > buf_size) pl = buf_size;
+            SX1262_ReadBuffer(rs, buf, pl);
+            *rx_len = pl;
+
             return 0;
         }
         if (irq & SX1262_IRQ_TIMEOUT) {

@@ -446,7 +446,7 @@ int main(void)
           /* Re-check status for diagnostics */
           SX1262_GetRxBufferStatus(&raw_plen, &raw_ptr);
 
-          printf("\r\n[RX #%lu] Packet received! rx_len=%u bytes, raw_plen=%u\r\n",
+          printf("\r\n\n[RX #%lu] Packet received! rx_len=%u bytes, raw_plen=%u\r\n",
                  rx_pkt_count, rx_len, raw_plen);
           printf("  Signal: RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
                  pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
@@ -454,10 +454,9 @@ int main(void)
           if (rx_len > 0) {
               printf("  Payload: ");
               for (i = 0; i < rx_len; i++) {
-                  printf("%c", (rx_buf[i] >= 32 && rx_buf[i] <= 126) ? rx_buf[i] : '.');
+                  printf("%c", rx_buf[i]);
               }
-              printf("\r\n");
-              printf("  Hex: ");
+              printf("\r\n  Hex:");
               for (i = 0; i < rx_len; i++) {
                   printf("%02X ", rx_buf[i]);
               }
@@ -478,18 +477,10 @@ int main(void)
           /* Timeout: no packet received within timeout */
           printf(".");
           fflush(stdout);
-          printf("  SX1262 err code after RX TIMEOUT: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
-          {
-            uint8_t status = SX1262_GetStatus();
-            sx1262_status_t decoded;
-            SX1262_DecodeStatus(status, &decoded);
-            printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
-          }
 
       } else if (rx_rc == -2) {
           /* CRC error or other error */
-          printf("  [RX Error] Error (rc=%d, err=0x%04X)\r\n", rx_rc, SX1262_GetDeviceErrors());
+          printf("[RX Error] Error (rc=%d, err=0x%04X)\r\n", rx_rc, SX1262_GetDeviceErrors());
           {
             uint8_t status = SX1262_GetStatus();
             sx1262_status_t decoded;
