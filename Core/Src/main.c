@@ -400,6 +400,11 @@ int main(void)
     uint8_t rx_buf[256];
     uint8_t rx_len = 0;
     int rx_rc = 0;
+    uint8_t i;
+    uint16_t irq_status = 0;
+    uint8_t raw_plen = 0, raw_ptr = 0;
+    sx1262_pkt_status_t pkt_status;
+
 
     /* RX loop waits below */
 
@@ -439,23 +444,33 @@ int main(void)
       if (rx_rc == 0) {
           /* ===== PACKET SUCCESSFULLY RECEIVED ===== */
           rx_pkt_count++;
-          sx1262_pkt_status_t pkt_status;
+          
           SX1262_GetPacketStatus(&pkt_status);
 
-          printf("\r\n[RX #%lu] Packet received! Length: %u bytes\r\n",
-                 rx_pkt_count, rx_len);
-          printf("  Signal: RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
-                 pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
-          printf("  Payload: ");
-          for (uint8_t i = 0; i < rx_len; i++) {
-              printf("%c", (rx_buf[i] >= 32 && rx_buf[i] <= 126) ? rx_buf[i] : '.');
+          /* DEBUG: Check header validity and buffer status */
+          irq_status = SX1262_GetIrqStatus();
+          raw_plen = 0, raw_ptr = 0;
+          SX1262_GetRxBufferStatus(&raw_plen, &raw_ptr);
+
+          printf("\r\n[RX #%lu] Packet detected! rx_len=%u, raw_plen=%u, raw_ptr=%u\r\n",
+                 rx_pkt_count, rx_len, raw_plen, raw_ptr);
+          printf("  IRQ flags: 0x%04X | RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
+                 irq_status, pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
+
+          if (rx_len > 0) {
+              printf("  Payload: ");
+              for (i = 0; i < rx_len; i++) {
+                  printf("%c", (rx_buf[i] >= 32 && rx_buf[i] <= 126) ? rx_buf[i] : '.');
+              }
+              printf("\r\n");
+              printf("  Hex: ");
+              for (i = 0; i < rx_len; i++) {
+                  printf("%02X ", rx_buf[i]);
+              }
+              printf("\r\n");
+          } else {
+              printf("  WARNING: Payload length is 0!\r\n");
           }
-          printf("\r\n");
-          printf("  Hex: ");
-          for (uint8_t i = 0; i < rx_len; i++) {
-              printf("%02X ", rx_buf[i]);
-          }
-          printf("\r\n");
 
       } else if (rx_rc == -1) {
           /* Timeout: no packet received within 5 seconds */

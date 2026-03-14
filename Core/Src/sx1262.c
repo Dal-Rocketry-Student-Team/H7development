@@ -311,6 +311,8 @@ void SX1262_GetRxBufferStatus(uint8_t *plen, uint8_t *ptr) {
     uint8_t b[2]={0};
     SX1262_ReadCommand(SX1262_CMD_GET_RX_BUFFER_STATUS, b, 2);
     *plen=b[0]; *ptr=b[1];
+    /* DEBUG: Log the raw bytes for troubleshooting */
+    printf("[DEBUG] GetRxBufferStatus: raw_b[0]=%u (0x%02X), raw_b[1]=%u (0x%02X)\r\n", b[0], b[0], b[1], b[1]);
 }
 
 void SX1262_GetPacketStatus(sx1262_pkt_status_t *s) {
@@ -457,14 +459,25 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
     while (1) {
         uint16_t irq = SX1262_GetIrqStatus();
         if (irq & SX1262_IRQ_RX_DONE) {
+            /* Read buffer status BEFORE clearing IRQ flags! */
+            uint8_t pl, rs;
+            SX1262_GetRxBufferStatus(&pl, &rs);
+            
+            /* Now clear IRQ and disable TX/RX */
             SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-            SX1262_HW_SetTxEn(0); SX1262_HW_SetRxEn(0);
-            if (irq & SX1262_IRQ_CRC_ERR) { *rx_len=0; return -2; }
-            uint8_t pl,rs;
-            SX1262_GetRxBufferStatus(&pl,&rs);
-            if(pl>buf_size) pl=buf_size;
-            SX1262_ReadBuffer(rs,buf,pl);
-            *rx_len=pl;
+            SX1262_HW_SetTxEn(0); 
+            SX1262_HW_SetRxEn(0);
+            
+            /* Check CRC error after reading buffer status */
+            if (irq & SX1262_IRQ_CRC_ERR) { 
+                *rx_len = 0; 
+                return -2; 
+            }
+            
+            /* Read packet from FIFO */
+            if (pl > buf_size) pl = buf_size;
+            SX1262_ReadBuffer(rs, buf, pl);
+            *rx_len = pl;
             return 0;
         }
         if (irq & SX1262_IRQ_TIMEOUT) {
