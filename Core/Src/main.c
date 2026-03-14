@@ -218,6 +218,15 @@ int main(void)
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
 
+  /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
+  static uint32_t rx_pkt_count = 0;
+  uint8_t rx_buf[256] = {0};
+  uint8_t rx_len = 17;
+  int rx_rc = 0;
+  uint8_t i = 0;
+  uint8_t raw_plen = 0, raw_ptr = 0;
+  sx1262_pkt_status_t pkt_status = {0};
+
   printf("\r\n=== SX1262 Continuous TX Bring-Up ===\r\n");
 
   /* --------------------------------------------------------
@@ -256,15 +265,15 @@ int main(void)
     printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
   }
 
-  SX1262_SetStandby(SX1262_STDBY_RC);
-  printf("SX1262 err code after second SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  // SX1262_SetStandby(SX1262_STDBY_RC);
+  // printf("SX1262 err code after second SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
   
-  {
-    uint8_t status = SX1262_GetStatus();
-    sx1262_status_t decoded;
-    SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
-  }
+  // {
+  //   uint8_t status = SX1262_GetStatus();
+  //   sx1262_status_t decoded;
+  //   SX1262_DecodeStatus(status, &decoded);
+  //   printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+  // }
   
   // SX1262_Calibrate(0x7F);
   // printf("SX1262 err code after calibration: 0x%04X\r\n", SX1262_GetDeviceErrors());
@@ -395,17 +404,6 @@ int main(void)
     */
     printf("Starting continuous RX mode at 915 MHz...\r\n");
     printf("Waiting for LoRa packets (SF9, BW125K, private sync word)...\r\n");
-
-    static uint32_t rx_pkt_count = 0;
-    uint8_t rx_buf[256];
-    uint8_t rx_len = 0;
-    int rx_rc = 0;
-    uint8_t i;
-    uint16_t irq_status = 0;
-    uint8_t raw_plen = 0, raw_ptr = 0;
-    sx1262_pkt_status_t pkt_status;
-
-
     /* RX loop waits below */
 
   #endif
@@ -435,27 +433,23 @@ int main(void)
     #elif TX_MODE == 5
       /* ======== CONTINUOUS RX LOOP ========
        * Wait for incoming packets with 5-second timeout per packet.
-       * If no packet received within timeout, re-enter RX mode.
        */
 
       /* Block waiting for a packet (5 second timeout per attempt) */
-      rx_rc = SX1262_ReceiveLora(rx_buf, sizeof(rx_buf), &rx_len, 5000);
+      rx_rc = SX1262_ReceiveLora(rx_buf, 256, &rx_len, 5000);
 
       if (rx_rc == 0) {
           /* ===== PACKET SUCCESSFULLY RECEIVED ===== */
           rx_pkt_count++;
-          
           SX1262_GetPacketStatus(&pkt_status);
 
-          /* DEBUG: Check header validity and buffer status */
-          irq_status = SX1262_GetIrqStatus();
-          raw_plen = 0, raw_ptr = 0;
+          /* Re-check status for diagnostics */
           SX1262_GetRxBufferStatus(&raw_plen, &raw_ptr);
 
-          printf("\r\n[RX #%lu] Packet detected! rx_len=%u, raw_plen=%u, raw_ptr=%u\r\n",
-                 rx_pkt_count, rx_len, raw_plen, raw_ptr);
-          printf("  IRQ flags: 0x%04X | RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
-                 irq_status, pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
+          printf("\r\n[RX #%lu] Packet received! rx_len=%u bytes, raw_plen=%u\r\n",
+                 rx_pkt_count, rx_len, raw_plen);
+          printf("  Signal: RSSI=%d dBm, SNR=%d dB, Signal_RSSI=%d dBm\r\n",
+                 pkt_status.rssi_pkt, pkt_status.snr_pkt, pkt_status.signal_rssi);
 
           if (rx_len > 0) {
               printf("  Payload: ");
@@ -467,24 +461,55 @@ int main(void)
               for (i = 0; i < rx_len; i++) {
                   printf("%02X ", rx_buf[i]);
               }
-              printf("\r\n");
+              printf("SX1262 err code after RX len VALID: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+              {
+                uint8_t status = SX1262_GetStatus();
+                sx1262_status_t decoded;
+                SX1262_DecodeStatus(status, &decoded);
+                printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+              }
+
           } else {
-              printf("  WARNING: Payload length is 0!\r\n");
+              printf("  WARNING: rx_len is 0, but raw_plen=%u from hardware!\r\n", raw_plen);
+              printf("SX1262 err code after RX len 0 detected: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+              {
+                uint8_t status = SX1262_GetStatus();
+                sx1262_status_t decoded;
+                SX1262_DecodeStatus(status, &decoded);
+                printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+              }
           }
 
       } else if (rx_rc == -1) {
-          /* Timeout: no packet received within 5 seconds */
-          printf(".");  /* Quiet indicator - just show we're still waiting */
+          /* Timeout: no packet received within timeout */
+          printf(".");
           fflush(stdout);
+          printf("SX1262 err code after RX TIMEOUT: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  
+          {
+            uint8_t status = SX1262_GetStatus();
+            sx1262_status_t decoded;
+            SX1262_DecodeStatus(status, &decoded);
+            printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+          }
 
       } else if (rx_rc == -2) {
           /* CRC error or other error */
-          printf("[RX Error] CRC failure or device error (rc=%d, err=0x%04X)\r\n",
-                 rx_rc, SX1262_GetDeviceErrors());
+          printf("[RX Error] Error (rc=%d, err=0x%04X)\r\n", rx_rc, SX1262_GetDeviceErrors());
+          {
+            uint8_t status = SX1262_GetStatus();
+            sx1262_status_t decoded;
+            SX1262_DecodeStatus(status, &decoded);
+            printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+          }
           SX1262_ClearDeviceErrors();
           SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
-          HAL_Delay(100);  /* Brief pause before retrying */
+          HAL_Delay(100);
       }
+
+      /* Loop continues immediately to wait for the next packet */
     #endif
   }
 

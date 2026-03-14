@@ -9,6 +9,7 @@
 #include "sx1262.h"
 #include "sx1262_hal.h"
 #include <string.h>
+#include <stdio.h>
 
 static inline uint32_t _us_to_ticks(uint32_t us)
 {
@@ -311,8 +312,6 @@ void SX1262_GetRxBufferStatus(uint8_t *plen, uint8_t *ptr) {
     uint8_t b[2]={0};
     SX1262_ReadCommand(SX1262_CMD_GET_RX_BUFFER_STATUS, b, 2);
     *plen=b[0]; *ptr=b[1];
-    /* DEBUG: Log the raw bytes for troubleshooting */
-    printf("[DEBUG] GetRxBufferStatus: raw_b[0]=%u (0x%02X), raw_b[1]=%u (0x%02X)\r\n", b[0], b[0], b[1], b[1]);
 }
 
 void SX1262_GetPacketStatus(sx1262_pkt_status_t *s) {
@@ -385,7 +384,7 @@ int SX1262_Init(void)
 
     SX1262_SetRegulatorMode(SX1262_REGULATOR_DC_DC);
     SX1262_SetDio2AsRfSwitchCtrl(false);
-    SX1262_SetBufferBaseAddress(0x00, 0x80);
+    SX1262_SetBufferBaseAddress(0x00, 0x00);
     SX1262_SetRxTxFallbackMode(SX1262_FALLBACK_STDBY_RC);
 
     /* Apply TX clamp workaround (datasheet errata — prevents sub-optimal PA) */
@@ -405,6 +404,7 @@ void SX1262_ConfigureLora(uint32_t freq_hz,
     SX1262_SetStandby(SX1262_STDBY_RC);
     SX1262_SetPacketType(SX1262_PACKET_TYPE_LORA);
     SX1262_SetRfFrequency(freq_hz);
+    SX1262_SetBufferBaseAddress(0x00, 0x00);
     SX1262_CalibrateImage(0xE1, 0xE9);
     SX1262_SetPaConfig(0x04, 0x07, 0x00);
     _workaround_tx_clamp();
@@ -463,6 +463,9 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
             uint8_t pl, rs;
             SX1262_GetRxBufferStatus(&pl, &rs);
             
+            /* DEBUG: Log what we read from hardware */
+            printf("[ReceiveLora] IRQ_RX_DONE: pl=%u, rs=%u, buf_size=%u\r\n", pl, rs, buf_size);
+            
             /* Now clear IRQ and disable TX/RX */
             SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
             SX1262_HW_SetTxEn(0); 
@@ -470,14 +473,18 @@ int SX1262_ReceiveLora(uint8_t *buf, uint8_t buf_size, uint8_t *rx_len,
             
             /* Check CRC error after reading buffer status */
             if (irq & SX1262_IRQ_CRC_ERR) { 
+                printf("[ReceiveLora] CRC ERROR detected!\r\n");
                 *rx_len = 0; 
                 return -2; 
             }
             
             /* Read packet from FIFO */
             if (pl > buf_size) pl = buf_size;
+            printf("[ReceiveLora] About to read %u bytes from offset %u\r\n", pl, rs);
             SX1262_ReadBuffer(rs, buf, pl);
+            printf("[ReceiveLora] Read complete, setting *rx_len to %u\r\n", pl);
             *rx_len = pl;
+            printf("[ReceiveLora] After assignment: *rx_len=%u\r\n", *rx_len);
             return 0;
         }
         if (irq & SX1262_IRQ_TIMEOUT) {
