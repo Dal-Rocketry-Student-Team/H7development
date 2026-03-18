@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
-#include "stm32h7xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -354,33 +353,17 @@ int main(void)
 
   #endif
 
-  printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
+  printf("\r\n=== MS5607 Barometer Init ===\r\n");
 
   /* Setup MS5607 */
   MS5607StateTypeDef ms5607_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
   if (ms5607_status == MS5607_STATE_FAILED) {
     printf("Barometer init failed!\r\n");
+  } else {
+    printf("Barometer initialized successfully\r\n");
   }
 
-  /* Read 8 PROM words */
-  struct promData promData;
-  MS5607PromRead(&promData);
-
-  printf("PROM Data:\r\n");
-  printf("C0 (Reserved): %u\r\n", promData.reserved);
-  printf("C1 (SENS): %u\r\n", promData.sens);
-  printf("C2 (OFF): %u\r\n", promData.off);
-  printf("C3 (TCS): %u\r\n", promData.tcs);
-  printf("C4 (TOS): %u\r\n", promData.tco);
-  printf("C5 (TREF): %u\r\n", promData.tref);
-  printf("C6 (TEMP): %u\r\n", promData.tempsens);
-  printf("C7 (CRC): %u\r\n", promData.crc);
-
-  printf("=== DONE ===\r\n");
-
-  double temp_C = 0.0;
-  int32_t pressure_Pa = 0;
-
+  /* Configure oversampling ratio */
   MS5607SetPressureOSR(OSR_4096);
   MS5607SetTemperatureOSR(OSR_4096);
     
@@ -400,9 +383,6 @@ int main(void)
 
       /* === Barometer Code === */
       MS5607Update();
-      temp_C = MS5607GetTemperatureC();
-      pressure_Pa = MS5607GetPressurePa();
-      printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
 
       /* === RADIO MODE BEHAVIOR === */
       // Telemetry struct packing
@@ -414,17 +394,16 @@ int main(void)
       telem.gx                  = gyro_raw[0];            // raw gyro counts (not converted to dps for simplicity)
       telem.gy                  = gyro_raw[1];            // raw gyro counts  
       telem.gz                  = gyro_raw[2];            // raw gyro counts
-      telem.temperature_cdeg    = (int16_t)(temp_C*100);  // baro temp in centi-degrees C (e.g. 2315 = 23.15 °C)
-      telem.pressure_pa         = pressure_Pa;            // raw pressure in Pa
+      telem.temperature_cdeg    = (int16_t)(MS5607GetTemperatureC()*100);  // baro temp in centi-degrees C (e.g. 2315 = 23.15 °C)
+      telem.pressure_pa         = MS5607GetPressurePa();  // raw pressure in Pa
       telem.gps_lat             = 0.0f;                   // placeholder, set 0.0f until GPS ready
       telem.gps_lon             = 0.0f;                   // placeholder, set 0.0f until GPS ready
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
       if (tx_rc == 0) {
-          printf("TX #%d OK\r\n", telem_pkt_id);
+          printf("TX #%u OK\r\n", telem_pkt_id);
       } else {
-          printf("TX #%d FAIL (rc=%d, err=0x%04X)\r\n",
-                 telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
+          printf("TX #%u FAIL (rc=%d, err=0x%04X)\r\n", telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
           /* Try to recover */
           SX1262_ClearDeviceErrors();
           SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
