@@ -371,6 +371,7 @@ int main(void)
     } else {
         /* rc == -2: CRC error */
         printf("\r\n[RX CRC ERROR] err=0x%04X\r\n", SX1262_GetDeviceErrors());
+        fflush(stdout);
         SX1262_ClearDeviceErrors();
         SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
     }
