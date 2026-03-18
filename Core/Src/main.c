@@ -223,7 +223,35 @@ int main(void)
   // Setup MS5607 barometer
   MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
 
-  
+  printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
+
+  /* Setup MS5607 */
+  MS5607StateTypeDef ms5607_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+  if (ms5607_status == MS5607_STATE_FAILED) {
+    printf("Barometer init failed!\r\n");
+  }
+
+  /* Read 8 PROM words */
+  struct promData promData;
+  MS5607PromRead(&promData);
+
+  printf("PROM Data:\r\n");
+  printf("C0 (Reserved): %u\r\n", promData.reserved);
+  printf("C1 (SENS): %u\r\n", promData.sens);
+  printf("C2 (OFF): %u\r\n", promData.off);
+  printf("C3 (TCS): %u\r\n", promData.tcs);
+  printf("C4 (TOS): %u\r\n", promData.tco);
+  printf("C5 (TREF): %u\r\n", promData.tref);
+  printf("C6 (TEMP): %u\r\n", promData.tempsens);
+  printf("C7 (CRC): %u\r\n", promData.crc);
+
+  printf("=== DONE ===\r\n");
+
+  double temp_C = 0.0;
+  int32_t pressure_Pa = 0;
+
+  MS5607SetPressureOSR(OSR_4096);
+  MS5607SetTemperatureOSR(OSR_4096);
 
   /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
   static uint32_t rx_pkt_count = 0;
@@ -325,10 +353,15 @@ int main(void)
       * Wait for incoming packets with 5-second timeout per packet.
     */
 
+    /* === Barometer Code === */
+    MS5607Update();
+    temp_C = MS5607GetTemperatureC();
+    pressure_Pa = MS5607GetPressurePa();
+    printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
+
     rx_rc = SX1262_ReceiveLora(rx_buf, sizeof(rx_buf), &rx_len, 1000);
 
     if (rx_rc == 0) {
-        rx_pkt_count++;
         SX1262_GetPacketStatus(&pkt_status);
 
         printf("\r\n[RX #%lu] %u bytes | RSSI=%d dBm  SNR=%d dB\r\n",
@@ -355,6 +388,8 @@ int main(void)
 
             printf("  GPS    lat=%.6f   lon=%.6f\r\n",
                    p->gps_lat, p->gps_lon);
+
+            rx_pkt_count++;     // increment packet count for next packet's printout
 
         } else {
             /* Length mismatch — wrong transmitter, stale packet, or framing error.
