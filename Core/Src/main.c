@@ -391,33 +391,33 @@ int main(void)
 
   while (1)
   {
-    /* === IMU Code === */
-    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
-    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
+    
+    #if TX_MODE == 1
 
-    /* === Barometer Code === */
+      /* === IMU Code === */
+      lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
+      lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
+
+      /* === Barometer Code === */
       MS5607Update();
       temp_C = MS5607GetTemperatureC();
       pressure_Pa = MS5607GetPressurePa();
-
       printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
 
-    /* === RADIO MODE BEHAVIOR === */
-    #if TX_MODE == 1
-
+      /* === RADIO MODE BEHAVIOR === */
       // Telemetry struct packing
-      telem.packet_id           = telem_pkt_id++;
-      telem.timestamp_ms        = HAL_GetTick();
-      telem.ax                  = accel_raw[0];
-      telem.ay                  = accel_raw[1];
-      telem.az                  = accel_raw[2];
-      telem.gx                  = gyro_raw[0];
-      telem.gy                  = gyro_raw[1];
-      telem.gz                  = gyro_raw[2];
-      telem.temperature_cdeg    = (uint16_t)(temp_C*100);
-      telem.pressure_pa         = pressure_Pa;
-      telem.gps_lat             = 0;
-      telem.gps_lon             = 0;
+      telem.packet_id           = telem_pkt_id;           // assign current packet ID
+      telem.timestamp_ms        = HAL_GetTick();          // simple timestamp in milliseconds since boot
+      telem.ax                  = accel_raw[0];           // raw accel counts (not converted to g's for simplicity)
+      telem.ay                  = accel_raw[1];           // raw accel counts
+      telem.az                  = accel_raw[2];           // raw accel counts
+      telem.gx                  = gyro_raw[0];            // raw gyro counts (not converted to dps for simplicity)
+      telem.gy                  = gyro_raw[1];            // raw gyro counts  
+      telem.gz                  = gyro_raw[2];            // raw gyro counts
+      telem.temperature_cdeg    = (int16_t)(temp_C*100);  // baro temp in centi-degrees C (e.g. 2315 = 23.15 °C)
+      telem.pressure_pa         = pressure_Pa;            // raw pressure in Pa
+      telem.gps_lat             = 0.0f;                   // placeholder, set 0.0f until GPS ready
+      telem.gps_lon             = 0.0f;                   // placeholder, set 0.0f until GPS ready
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
       if (tx_rc == 0) {
@@ -431,9 +431,12 @@ int main(void)
           SX1262_SetStandby(SX1262_STDBY_RC);
           HAL_Delay(100);
       }
+      telem_pkt_id++;   // increment packet ID for next transmission
 
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
+    
     #endif
+  
   }
 
     /* USER CODE END WHILE */
