@@ -387,6 +387,36 @@ int main(void)
     SX1262_SetStandby(SX1262_STDBY_RC);
 
   #endif
+
+  printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
+
+  /* Setup MS5607 */
+  MS5607StateTypeDef status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+  if (status == MS5607_STATE_FAILED) {
+    printf("Barometer init failed!\r\n");
+  }
+
+  /* Read 8 PROM words */
+  struct promData promData;
+  MS5607PromRead(&promData);
+
+  printf("PROM Data:\r\n");
+  printf("C0 (Reserved): %u\r\n", promData.reserved);
+  printf("C1 (SENS): %u\r\n", promData.sens);
+  printf("C2 (OFF): %u\r\n", promData.off);
+  printf("C3 (TCS): %u\r\n", promData.tcs);
+  printf("C4 (TOS): %u\r\n", promData.tco);
+  printf("C5 (TREF): %u\r\n", promData.tref);
+  printf("C6 (TEMP): %u\r\n", promData.tempsens);
+  printf("C7 (CRC): %u\r\n", promData.crc);
+
+  printf("=== DONE ===\r\n");
+
+  double temp_C = 0.0;
+  int32_t pressure_Pa = 0;
+
+  MS5607SetPressureOSR(OSR_4096);
+  MS5607SetTemperatureOSR(OSR_4096);
     
   /* USER CODE END 2 */
 
@@ -395,6 +425,7 @@ int main(void)
 
   while (1)
   {
+    /* === RADIO MODE BEHAVIOR === */
     #if TX_MODE == 1
       tx_rc = SX1262_TransmitLora(payload, payload_len, 1000);
       pkt_count++;
@@ -409,6 +440,14 @@ int main(void)
           SX1262_SetStandby(SX1262_STDBY_RC);
           HAL_Delay(100);
       }
+
+      /* === Barometer Code === */
+      MS5607Update();
+      temp_C = MS5607GetTemperatureC();
+      pressure_Pa = MS5607GetPressurePa();
+
+      printf("Temperature: %.2f C, Pressure: %d Pa\r\n", temp_C, pressure_Pa);
+
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
     #endif
   }
