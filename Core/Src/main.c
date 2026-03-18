@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include "lsm6dsv16x_reg.h" // LSM6DSV16X driver header file
 #include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
@@ -72,15 +73,24 @@ extern volatile float q0, q1, q2, q3;      // quaternion (from Madgwick)
 extern volatile float sampleFreq;          // Madgwick internal sample rate
 static float gyro_bias_dps[3] = {0};       // boot-time gyro bias estimate
 
-// There are 3 axes of data for both the accelerometer and gyroscope, each a 16 bit value
-int16_t accel_raw[3] = {0}, gyro_raw[3] = {0};
+// === LSM6DSV variables ===
+int16_t accel_raw[3] = {0}, gyro_raw[3] = {0};// There are 3 axes of data for both the accelerometer and gyroscope, each a 16 bit value
 float accel_g[3] = {0}, gyro_dps[3] = {0};
+stmdev_ctx_t lsm6dsv16x_ctx;// Making an instance of the ctx_t struct to use in accessing the lsm6dsv16x
+lsm6dsv16x_data_ready_t drdy;// data-ready flags to see if new data is available
 
-// Making an instance of the ctx_t struct to use in accessing the lsm6dsv16x
-stmdev_ctx_t lsm6dsv16x_ctx;
+// === SX1262 RX variables (always in scope, used by RX mode) ===
+static uint32_t rx_pkt_count = 0;
+uint8_t rx_buf[255] = {0};      // SX1262 max payload is 255 bytes
+uint8_t rx_len = 0;
+int rx_rc = 0;
+uint8_t i = 0;
+sx1262_pkt_status_t pkt_status = {0};
 
-// data-ready flags to see if new data is available
-lsm6dsv16x_data_ready_t drdy;
+// === Ground station barometer (updated every loop, used as altitude reference) ===
+static float gs_temp_c     = 15.0f;    // initialised to ISA standard, overwritten immediately
+static float gs_pressure_pa = 101325.0f;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -167,6 +177,35 @@ static void IMU_Init_LSM6DSV16X(stmdev_ctx_t *ctx) {
     HAL_Delay(20);
 }
 
+/**
+ * @brief  Calculate altitude above ground level using the hypsometric formula.
+ *
+ * Formula:  h = (T_ground_K / 0.0065) * (1 - (P_rocket / P_ground)^0.190295)
+ *
+ * Why this formula works:
+ *   Pressure drops roughly exponentially with altitude. The hypsometric formula
+ *   inverts that relationship to get height from a pressure ratio. The exponent
+ *   0.190295 comes from R*L/g — the gas constant for dry air, the temperature
+ *   lapse rate, and gravitational acceleration combined into one constant.
+ *
+ * Why we use ground station temp and pressure instead of sea-level constants:
+ *   Using the ground station's LIVE readings as the reference gives altitude
+ *   above ground level (AGL) directly. If we used sea-level constants we would
+ *   get altitude above sea level, which requires knowing the launch site elevation
+ *   and is less useful in flight.
+ *
+ * @param  rocket_Pa      Pressure reading from the rocket barometer (Pa)
+ * @param  ground_Pa      Pressure reading from the ground station barometer (Pa)
+ * @param  ground_temp_C  Temperature from the ground station barometer (°C)
+ * @return Altitude AGL in metres. Positive = above ground. Zero at launch site.
+ */
+static float calculate_altitude_m(float rocket_Pa, float ground_Pa, float ground_temp_C)
+{
+    float T_K = ground_temp_C + 273.15f;           // Convert Celsius to Kelvin
+    float ratio = rocket_Pa / ground_Pa;           // Pressure ratio, rocket / ground
+    return (T_K / 0.0065f) * (1.0f - powf(ratio, 0.190295f));
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -220,48 +259,17 @@ int main(void)
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
 
-  // Setup MS5607 barometer
-  MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
-
-  printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
-
-  /* Setup MS5607 */
+  // 1. Initialize, at startup
   MS5607StateTypeDef ms5607_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
   if (ms5607_status == MS5607_STATE_FAILED) {
-    printf("Barometer init failed!\r\n");
+      printf("Barometer init failed!\r\n");
   }
 
-  /* Read 8 PROM words */
-  struct promData promData;
-  MS5607PromRead(&promData);
-
-  printf("PROM Data:\r\n");
-  printf("C0 (Reserved): %u\r\n", promData.reserved);
-  printf("C1 (SENS): %u\r\n", promData.sens);
-  printf("C2 (OFF): %u\r\n", promData.off);
-  printf("C3 (TCS): %u\r\n", promData.tcs);
-  printf("C4 (TOS): %u\r\n", promData.tco);
-  printf("C5 (TREF): %u\r\n", promData.tref);
-  printf("C6 (TEMP): %u\r\n", promData.tempsens);
-  printf("C7 (CRC): %u\r\n", promData.crc);
-
-  printf("=== DONE ===\r\n");
-
-  double temp_C = 0.0;
-  int32_t pressure_Pa = 0;
-
+  // 2. Set baro and temp OSR (oversampling ratio) to max for best resolution (and slowest conversion time)
   MS5607SetPressureOSR(OSR_4096);
   MS5607SetTemperatureOSR(OSR_4096);
 
-  /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
-  static uint32_t rx_pkt_count = 0;
-  uint8_t rx_buf[255] = {0};      // SX1262 max payload is 255 bytes
-  uint8_t rx_len = 0;
-  int rx_rc = 0;
-  uint8_t i = 0;
-  sx1262_pkt_status_t pkt_status = {0};
-
-  printf("\r\n=== GROUNDSTATION RX ===\r\n");
+  printf("\r\n=== GROUNDSTATION RX ===\r\n\n");
 
   /* --------------------------------------------------------
    * Step 0: Full hardware + chip init (reset, TCXO, cal, DC-DC)
@@ -348,25 +356,16 @@ int main(void)
 
   while (1)
   {
-    
-    /* ======== CONTINUOUS RX LOOP ========
-      * Wait for incoming packets with 5-second timeout per packet.
-    */
 
     /* === Barometer Code === */
-    MS5607Update();
-    temp_C = MS5607GetTemperatureC();
-    pressure_Pa = MS5607GetPressurePa();
-    printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
+    MS5607Update();     // Reads sensor, applies calibration, stored internally
+    gs_temp_c      = (float)MS5607GetTemperatureC();
+    gs_pressure_pa = (float)MS5607GetPressurePa();
 
     rx_rc = SX1262_ReceiveLora(rx_buf, sizeof(rx_buf), &rx_len, 1000);
 
     if (rx_rc == 0) {
         SX1262_GetPacketStatus(&pkt_status);
-
-        printf("\r\n[RX #%lu] %u bytes | RSSI=%d dBm  SNR=%d dB\r\n",
-               rx_pkt_count, rx_len,
-               pkt_status.rssi_pkt, pkt_status.snr_pkt);
 
         if (rx_len == sizeof(rocket_telemetry_t)) {
             /* Cast the raw byte buffer directly to the packet struct.
@@ -374,20 +373,27 @@ int main(void)
              * no padding bytes, so the memory layout is identical on both ends. */
             rocket_telemetry_t *p = (rocket_telemetry_t *)rx_buf;
 
-            printf("  Pkt #%u  |  t=%lu ms\r\n",
-                   p->packet_id, p->timestamp_ms);
+            // Decode baro fields from the RX message
+            float rkt_temp_c = p->temperature_cdeg / 100.0f; // convert from centi-degrees to degrees
+            float rkt_press_pa = p->pressure_pa;
 
-            printf("  Accel  X=%7.3f g    Y=%7.3f g    Z=%7.3f g\r\n",
+            // Calculate altitude AGL using the ground station as reference
+            float altitude_m = calculate_altitude_m(rkt_press_pa, gs_pressure_pa, gs_temp_c);
+
+            // Formatted print output
+            printf("\r\n============================================\r\n");
+            printf(" PKT #%-5u  T+%lu ms\r\n", p->packet_id, p->timestamp_ms);
+            printf(" Signal_RSSI = %d dBm | RSSI = %d dBm | SNR = %d dB\r\n", pkt_status.signal_rssi, pkt_status.rssi_pkt, pkt_status.snr_pkt);
+            printf("------------------------------------------------------------------------------\r\n");
+            printf(" ALT      %8.1f m AGL\r\n", altitude_m);
+            printf(" BARO RKT   %6.2f C    %7.0f Pa\r\n", rkt_temp_c, rkt_press_pa);
+            printf(" BARO GND   %6.2f C    %7.0f Pa\r\n", gs_temp_c, gs_pressure_pa);
+            printf(" ACCEL  X=%7.3f g   Y=%7.3f g   Z=%7.3f g\r\n",
                    p->ax / 2048.0f, p->ay / 2048.0f, p->az / 2048.0f);
-
-            printf("  Gyro   X=%7.1f dps  Y=%7.1f dps  Z=%7.1f dps\r\n",
+            printf(" GYRO   X=%7.1f dps Y=%7.1f dps Z=%7.1f dps\r\n",
                    p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
-
-            printf("  Baro   %.2f C   %ld Pa\r\n",
-                   p->temperature_cdeg / 100.0f, p->pressure_pa);
-
-            printf("  GPS    lat=%.6f   lon=%.6f\r\n",
-                   p->gps_lat, p->gps_lon);
+            printf(" GPS    lat=%.6f   lon=%.6f\r\n", p->gps_lat, p->gps_lon);
+            printf("============================================\r\n");
 
             rx_pkt_count++;     // increment packet count for next packet's printout
 
@@ -397,9 +403,7 @@ int main(void)
             printf("  WARNING: got %u bytes, expected %u\r\n",
                    rx_len, (unsigned)sizeof(rocket_telemetry_t));
             printf("  Raw: ");
-            for (i = 0; i < rx_len; i++) {
-                printf("%02X ", rx_buf[i]);
-            }
+            for (i = 0; i < rx_len; i++) printf("%02X ", rx_buf[i]);
             printf("\r\n");
         }
 
@@ -411,7 +415,6 @@ int main(void)
     } else {
         /* rc == -2: CRC error */
         printf("\r\n[RX CRC ERROR] err=0x%04X\r\n", SX1262_GetDeviceErrors());
-        fflush(stdout);
         SX1262_ClearDeviceErrors();
         SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
     }
