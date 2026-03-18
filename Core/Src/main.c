@@ -220,6 +220,11 @@ int main(void)
 
   IMU_Init_LSM6DSV16X(&lsm6dsv16x_ctx);
 
+  // Setup MS5607 barometer
+  MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+
+  
+
   /* ===== DECLARE RX VARIABLES (always in scope, used by RX mode) ===== */
   static uint32_t rx_pkt_count = 0;
   uint8_t rx_buf[255] = {0};      // SX1262 max payload is 255 bytes
