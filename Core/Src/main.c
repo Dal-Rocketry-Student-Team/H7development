@@ -31,7 +31,7 @@
 
 #include "lsm6dsv16x_reg.h" // LSM6DSV16X driver header file
 #include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
-
+#include "MS5607SPI.h"   // MS5607 pressure sensor driver header file
 #include "sx1262.h"        // SX1262 LoRa driver header file
 #include "sx1262_hal.h"     // SX1262 hardware abstraction header file
 /* USER CODE END Includes */
@@ -225,49 +225,17 @@ int main(void)
    * This follows section 14.2 pre-requisites.
    * -------------------------------------------------------- */
 
-  SX1262_HW_Init();
-  printf("SX1262 err code after HW INIT: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  SX1262_ClearDeviceErrors();
+  SX1262_Init();
 
   {
-    uint8_t status = SX1262_GetStatus();
-    sx1262_status_t decoded;
-    SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
-  }
-  
-  SX1262_SetStandby(SX1262_STDBY_RC);
-  printf("SX1262 err code after first SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
-
-  // SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
-  // HAL_Delay(2);
-  // printf("SX1262 err code after SET DIO3 AS TCXO CONTROL: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
-  // SX1262_HW_DelayMs(15);
-  // printf("SX1262 err code after 15 ms delay: 0x%04X\r\n", SX1262_GetDeviceErrors());
-
-  // SX1262_SetStandby(SX1262_STDBY_XOSC);
-  // printf("SX1262 err code after STANDBY XOSC: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
-  {
+    printf("SX1262 err code after RADIO INIT: 0x%04X\r\n", SX1262_GetDeviceErrors());
     uint8_t status = SX1262_GetStatus();
     sx1262_status_t decoded;
     SX1262_DecodeStatus(status, &decoded);
     printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
   }
 
-  SX1262_SetStandby(SX1262_STDBY_RC);
-  printf("SX1262 err code after second SetStandby RC: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
-  {
-    uint8_t status = SX1262_GetStatus();
-    sx1262_status_t decoded;
-    SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
-  }
-  
-  // SX1262_Calibrate(0x7F);
-  // printf("SX1262 err code after calibration: 0x%04X\r\n", SX1262_GetDeviceErrors());
+  // Give the radio some settling time
   SX1262_HW_DelayMs(5);
 
   /* --------------------------------------------------------
@@ -301,9 +269,8 @@ int main(void)
   SX1262_ConfigureLora(915000000UL, &mod, &pkt);
   printf("Radio configured: 915 MHz, SF9, BW125K, CR4/5, +22 dBm\r\n");
   
-  printf("SX1262 err code after CONFIGURE LORA: 0x%04X\r\n", SX1262_GetDeviceErrors());
-  
   {
+    printf("SX1262 err code after CONFIGURE LORA: 0x%04X\r\n", SX1262_GetDeviceErrors());
     uint8_t status = SX1262_GetStatus();
     sx1262_status_t decoded;
     SX1262_DecodeStatus(status, &decoded);
@@ -391,8 +358,8 @@ int main(void)
   printf("\r\n=== MS5607 Init & PROM READ ===\r\n");
 
   /* Setup MS5607 */
-  MS5607StateTypeDef status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
-  if (status == MS5607_STATE_FAILED) {
+  MS5607StateTypeDef ms5607_status = MS5607_Init(&hspi1, MS5_NCS_GPIO_Port, MS5_NCS_Pin);
+  if (ms5607_status == MS5607_STATE_FAILED) {
     printf("Barometer init failed!\r\n");
   }
 
@@ -446,7 +413,7 @@ int main(void)
       temp_C = MS5607GetTemperatureC();
       pressure_Pa = MS5607GetPressurePa();
 
-      printf("Temperature: %.2f C, Pressure: %d Pa\r\n", temp_C, pressure_Pa);
+      printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
 
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
     #endif

@@ -358,28 +358,12 @@ static void _workaround_invert_iq(bool inv) {
 int SX1262_Init(void)
 {
     SX1262_HW_Init();
-    SX1262_SetStandby(SX1262_STDBY_RC);
-
-    SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
-    SX1262_SetStandby(SX1262_STDBY_XOSC);
-    SX1262_HW_DelayMs(15);
     SX1262_ClearDeviceErrors();
 
     SX1262_SetStandby(SX1262_STDBY_RC);
+
     SX1262_Calibrate(0x7F);
     SX1262_HW_DelayMs(5);
-
-    uint16_t e = SX1262_GetDeviceErrors();
-    if (e & 0x0064) {
-        SX1262_ClearDeviceErrors();
-        SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
-        SX1262_SetStandby(SX1262_STDBY_XOSC);
-        SX1262_HW_DelayMs(20);
-        SX1262_SetStandby(SX1262_STDBY_RC);
-        SX1262_Calibrate(0x7F);
-        SX1262_HW_DelayMs(5);
-        SX1262_ClearDeviceErrors();
-    }
 
     SX1262_SetRegulatorMode(SX1262_REGULATOR_DC_DC);
     SX1262_SetDio2AsRfSwitchCtrl(false);
