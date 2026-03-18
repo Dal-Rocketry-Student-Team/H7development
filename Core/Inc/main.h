@@ -57,8 +57,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define Servo_Out_Pin GPIO_PIN_1
-#define Servo_Out_GPIO_Port GPIOA
 #define SPI2_CLK_Pin GPIO_PIN_5
 #define SPI2_CLK_GPIO_Port GPIOA
 #define SPI2_MISO_Pin GPIO_PIN_6
@@ -71,6 +69,8 @@ void Error_Handler(void);
 #define LSM_NCS_GPIO_Port GPIOC
 #define LSM_INT1_Pin GPIO_PIN_0
 #define LSM_INT1_GPIO_Port GPIOB
+#define LIS_NCS_Pin GPIO_PIN_7
+#define LIS_NCS_GPIO_Port GPIOE
 #define ADX_NCS_Pin GPIO_PIN_15
 #define ADX_NCS_GPIO_Port GPIOE
 #define MS5_NCS_Pin GPIO_PIN_10
@@ -85,6 +85,8 @@ void Error_Handler(void);
 #define SPI_MOSI_GPIO_Port GPIOB
 #define GPS_RESET_Pin GPIO_PIN_9
 #define GPS_RESET_GPIO_Port GPIOD
+#define GPS_PPS_Pin GPIO_PIN_10
+#define GPS_PPS_GPIO_Port GPIOD
 #define E22_RESET_Pin GPIO_PIN_11
 #define E22_RESET_GPIO_Port GPIOD
 #define E22_DIO1_Pin GPIO_PIN_12
