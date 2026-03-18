@@ -346,7 +346,7 @@ int main(void)
                    p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
 
             printf("  Baro   %.2f C   %ld Pa\r\n",
-                   p->temperature_cdeg / 100.0f, p->pressure_Pa);
+                   p->temperature_cdeg / 100.0f, p->pressure_pa);
 
             printf("  GPS    lat=%.6f   lon=%.6f\r\n",
                    p->gps_lat, p->gps_lon);
@@ -366,6 +366,7 @@ int main(void)
     } else if (rx_rc == -1) {
         /* Timeout — no packet in the last second, print a heartbeat dot */
         printf(".");
+        fflush(stdout); // ensure the dot appears immediately
 
     } else {
         /* rc == -2: CRC error */
