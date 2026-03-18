@@ -50,6 +50,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/MadgwickAHRS.c
     Core/Src/sx1262.c
     Core/Src/sx1262_hal.c
+    Core/Src/MS5607SPI.c
 )
 
 # Add include paths
