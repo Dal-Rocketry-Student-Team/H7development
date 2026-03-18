@@ -226,10 +226,9 @@ int main(void)
   uint8_t rx_len = 0;
   int rx_rc = 0;
   uint8_t i = 0;
-  uint8_t raw_plen = 0, raw_ptr = 0;
   sx1262_pkt_status_t pkt_status = {0};
 
-  printf("\r\n=== SX1262 Continuous TX Bring-Up ===\r\n");
+  printf("\r\n=== GROUNDSTATION RX ===\r\n");
 
   /* --------------------------------------------------------
    * Step 0: Full hardware + chip init (reset, TCXO, cal, DC-DC)
