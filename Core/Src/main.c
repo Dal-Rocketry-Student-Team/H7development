@@ -260,7 +260,7 @@ int main(void)
 
   sx1262_lora_pkt_t pkt = {
       .preamble_len = 12,
-      .fixed_length = false,   /* explicit header */
+      .fixed_length = false,
       .payload_len  = sizeof(telem),
       .crc_on       = true,
       .invert_iq    = false,
