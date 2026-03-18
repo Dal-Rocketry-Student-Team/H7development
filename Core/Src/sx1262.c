@@ -361,13 +361,15 @@ int SX1262_Init(void)
     SX1262_ClearDeviceErrors();
 
     SX1262_SetStandby(SX1262_STDBY_RC);
-
+    
     SX1262_Calibrate(0x7F);
     SX1262_HW_DelayMs(5);
 
     SX1262_SetRegulatorMode(SX1262_REGULATOR_DC_DC);
     SX1262_SetDio2AsRfSwitchCtrl(false);
-    SX1262_SetBufferBaseAddress(0x00, 0x80);
+    /* Partition the 256-byte FIFO: 216 bytes TX + 40 bytes RX.
+     * Must match TELEM_TX_BASE / TELEM_RX_BASE in telemetry.h. */
+    SX1262_SetBufferBaseAddress(SX1262_TX_BASE, SX1262_RX_BASE);
     SX1262_SetRxTxFallbackMode(SX1262_FALLBACK_STDBY_RC);
 
     /* Apply TX clamp workaround (datasheet errata — prevents sub-optimal PA) */
@@ -402,7 +404,9 @@ void SX1262_ConfigureLora(uint32_t freq_hz,
 
 int SX1262_TransmitLora(const uint8_t *data, uint8_t len, uint32_t timeout_ms)
 {
-    SX1262_WriteBuffer(0x00, data, len);
+    /* Write payload into the TX region of the FIFO.
+     * SX1262_TX_BASE must match what was passed to SetBufferBaseAddress(). */
+    SX1262_WriteBuffer(SX1262_TX_BASE, data, len);
     SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
 
     uint32_t timeout_us = timeout_ms > 0 ? timeout_ms * 1000UL : 0;

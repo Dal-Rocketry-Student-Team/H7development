@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "spi.h"
+#include "stm32h7xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -29,11 +30,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "lsm6dsv16x_reg.h" // LSM6DSV16X driver header file
-#include "MadgwickAHRS.h" // Madgwick AHRS algorithm header file
-#include "MS5607SPI.h"   // MS5607 pressure sensor driver header file
-#include "sx1262.h"        // SX1262 LoRa driver header file
-#include "sx1262_hal.h"     // SX1262 hardware abstraction header file
+#include "lsm6dsv16x_reg.h"   // LSM6DSV16X driver header file
+#include "MadgwickAHRS.h"     // Madgwick AHRS algorithm header file
+#include "MS5607SPI.h"        // MS5607 pressure sensor driver header file
+#include "sx1262.h"           // SX1262 LoRa driver header file
+#include "sx1262_hal.h"       // SX1262 hardware abstraction header file
+#include "telemetry.h"        // telemetry packet definitions
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,20 +67,21 @@
 /* USER CODE BEGIN PV */
 volatile uint8_t fusion_tick = 0;
 
-// --- Madgwick globals exposed by the library ---
+// === Madgwick globals exposed by the library ===
 extern volatile float q0, q1, q2, q3;      // quaternion (from Madgwick)
 extern volatile float sampleFreq;          // Madgwick internal sample rate
 static float gyro_bias_dps[3] = {0};       // boot-time gyro bias estimate
 
-// There are 3 axes of data for both the accelerometer and gyroscope, each a 16 bit value
-int16_t accel_raw[3] = {0}, gyro_raw[3] = {0};
+// === IMU variables ===
+int16_t accel_raw[3] = {0}, gyro_raw[3] = {0};    // There are 3 axes of data for both the accelerometer and gyroscope, each a 16 bit value
 float accel_g[3] = {0}, gyro_dps[3] = {0};
+stmdev_ctx_t lsm6dsv16x_ctx;      // Making an instance of the ctx_t struct to use in accessing the lsm6dsv16x
+lsm6dsv16x_data_ready_t drdy;     // data-ready flags to see if new data is available
 
-// Making an instance of the ctx_t struct to use in accessing the lsm6dsv16x
-stmdev_ctx_t lsm6dsv16x_ctx;
+// === Telemetry variables ===
+static rocket_telemetry_t telem = {0};   // creating an instance of the telemetry payload
+static uint16_t telem_pkt_id = 0;       // Rolling counter
 
-// data-ready flags to see if new data is available
-lsm6dsv16x_data_ready_t drdy;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -255,13 +258,10 @@ int main(void)
       .ldro = false,
   };
 
-  uint8_t payload[] = "HELLO_LORA_ROCKET";
-  uint8_t payload_len = sizeof(payload) - 1;  /* 17 bytes */
-
   sx1262_lora_pkt_t pkt = {
       .preamble_len = 12,
       .fixed_length = false,   /* explicit header */
-      .payload_len  = payload_len,
+      .payload_len  = sizeof(telem),
       .crc_on       = true,
       .invert_iq    = false,
   };
@@ -324,7 +324,6 @@ int main(void)
     * In SDR Sharp you'll see periodic chirp bursts around 915 MHz.
     */
     int tx_rc = 0;
-    static uint32_t pkt_count = 0;
 
     printf("Starting continuous LoRa TX...\r\n");
 
@@ -392,28 +391,46 @@ int main(void)
 
   while (1)
   {
+    /* === IMU Code === */
+    lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
+    lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
+
+    /* === Barometer Code === */
+      MS5607Update();
+      temp_C = MS5607GetTemperatureC();
+      pressure_Pa = MS5607GetPressurePa();
+
+      printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
+
     /* === RADIO MODE BEHAVIOR === */
     #if TX_MODE == 1
-      tx_rc = SX1262_TransmitLora(payload, payload_len, 1000);
-      pkt_count++;
+
+      // Telemetry struct packing
+      telem.packet_id           = telem_pkt_id++;
+      telem.timestamp_ms        = HAL_GetTick();
+      telem.ax                  = accel_raw[0];
+      telem.ay                  = accel_raw[1];
+      telem.az                  = accel_raw[2];
+      telem.gx                  = gyro_raw[0];
+      telem.gy                  = gyro_raw[1];
+      telem.gz                  = gyro_raw[2];
+      telem.temperature_cdeg    = (uint16_t)(temp_C*100);
+      telem.pressure_pa         = pressure_Pa;
+      telem.gps_lat             = 0;
+      telem.gps_lon             = 0;
+
+      tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
       if (tx_rc == 0) {
-          printf("TX #%lu OK\r\n", pkt_count);
+          printf("TX #%d OK\r\n", telem_pkt_id);
       } else {
-          printf("TX #%lu FAIL (rc=%d, err=0x%04X)\r\n",
-                 pkt_count, tx_rc, SX1262_GetDeviceErrors());
+          printf("TX #%d FAIL (rc=%d, err=0x%04X)\r\n",
+                 telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
           /* Try to recover */
           SX1262_ClearDeviceErrors();
           SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
           SX1262_SetStandby(SX1262_STDBY_RC);
           HAL_Delay(100);
       }
-
-      /* === Barometer Code === */
-      MS5607Update();
-      temp_C = MS5607GetTemperatureC();
-      pressure_Pa = MS5607GetPressurePa();
-
-      printf("Temperature: %.2f C, Pressure: %ld Pa\r\n", temp_C, pressure_Pa);
 
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
     #endif

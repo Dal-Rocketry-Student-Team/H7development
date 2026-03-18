@@ -91,6 +91,17 @@
 #define SX1262_LORA_SYNC_WORD_PUBLIC    0x3444   /* LoRaWAN public network */
 #define SX1262_LORA_SYNC_WORD_PRIVATE   0x1424   /* Private / peer-to-peer */
 
+/* FIFO buffer base addresses — must match telemetry.h TELEM_TX_BASE / TELEM_RX_BASE
+ * The SX1262 has a single 256-byte FIFO.  SetBufferBaseAddress() plants two
+ * pointers into it: where TX writes start and where RX writes start.
+ * Keeping these in sync with telemetry.h is your responsibility.
+ *
+ *   TX region: 0x00–0xD7  (216 bytes) — big downlink packets from rocket
+ *   RX region: 0xD8–0xFF  ( 40 bytes) — small uplink commands from ground
+ */
+#define SX1262_TX_BASE   0x00u   /**< TX FIFO base address */
+#define SX1262_RX_BASE   0xD8u   /**< RX FIFO base address (0xD8 = 216 decimal) */
+
 /* ===================================================================
  * Enumerations
  * =================================================================== */
