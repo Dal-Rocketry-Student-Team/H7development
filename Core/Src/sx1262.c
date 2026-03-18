@@ -360,13 +360,7 @@ int SX1262_Init(void)
 {
     SX1262_HW_Init();
     SX1262_SetStandby(SX1262_STDBY_RC);
-
-    SX1262_SetDio3AsTcxoCtrl(SX1262_TCXO_1V8, 10000);
-    SX1262_SetStandby(SX1262_STDBY_XOSC);
-    SX1262_HW_DelayMs(15);
     SX1262_ClearDeviceErrors();
-
-    SX1262_SetStandby(SX1262_STDBY_RC);
     SX1262_Calibrate(0x7F);
     SX1262_HW_DelayMs(5);
 
@@ -384,7 +378,7 @@ int SX1262_Init(void)
 
     SX1262_SetRegulatorMode(SX1262_REGULATOR_DC_DC);
     SX1262_SetDio2AsRfSwitchCtrl(false);
-    SX1262_SetBufferBaseAddress(0x00, 0x00);
+    SX1262_SetBufferBaseAddress(SX1262_TX_BASE, SX1262_RX_BASE);
     SX1262_SetRxTxFallbackMode(SX1262_FALLBACK_STDBY_RC);
 
     /* Apply TX clamp workaround (datasheet errata — prevents sub-optimal PA) */
