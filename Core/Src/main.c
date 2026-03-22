@@ -238,20 +238,31 @@ int main(void)
 
   GPS_init();  // Initialize GPS (sets up UART receive interrupt)
 
-  // TEMPORARY DIAGNOSTIC — remove after confirming UART reception
-  // Polls USART1 for 5 seconds and dumps everything raw to Putty.
-  // If you see garbage: baud rate mismatch.
-  // If you see clean $GNRMC sentences with V: working UART, no satellite fix.
-  // If you see nothing: wiring or CubeMX peripheral enable issue.
+  // TEMPORARY DIAGNOSTIC — remove after confirming UART reception.
+  // Bypasses HAL entirely and reads directly from the USART1 peripheral
+  // registers for 5 seconds, forwarding every byte raw to Putty via UART5.
+  //
+  // USART1->ISR bit 5 (RXNE/RXFNE): set by hardware when the receive data
+  // register contains a new byte.  Reading USART1->RDR clears it automatically.
+  // This path has zero dependence on HAL, NVIC, or DMA — if data appears here
+  // the peripheral is alive and the issue is purely in the interrupt layer.
+  //
+  // What to expect in Putty:
+  //   Clean $GNRMC,... sentences  -> peripheral is alive, HAL/NVIC was the issue
+  //   Garbage / framing errors    -> baud rate still wrong in CubeMX
+  //   Nothing at all              -> wiring fault, GPS not powered, or wrong pin
   {
       uint8_t b;
       uint32_t deadline = HAL_GetTick() + 5000;
-      printf("\r\n--- RAW USART1 (5s) ---\r\n");
+      printf("\r\n--- RAW USART1 register dump (5s) ---\r\n");
       while (HAL_GetTick() < deadline) {
-          if (HAL_UART_Receive(&huart1, &b, 1, 10) == HAL_OK)
+          // Poll RXNE (bit 5) directly — no HAL, no interrupts, no DMA
+          if (USART1->ISR & USART_ISR_RXNE_RXFNE) {
+              b = (uint8_t)(USART1->RDR & 0xFF);  // reading RDR clears RXNE automatically
               HAL_UART_Transmit(&huart5, &b, 1, HAL_MAX_DELAY);
+          }
       }
-      printf("\r\n--- END RAW ---\r\n");
+      printf("\r\n--- END ---\r\n");
       GPS_init(); // re-arm the interrupt after the polling diagnostic
   }
 
@@ -280,7 +291,7 @@ int main(void)
     uint8_t status = SX1262_GetStatus();
     sx1262_status_t decoded;
     SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+    printf("  -> Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
   }
 
   // Give the radio some settling time
@@ -319,7 +330,7 @@ int main(void)
     uint8_t status = SX1262_GetStatus();
     sx1262_status_t decoded;
     SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+    printf("  -> Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
   }
 
   /* Quick sanity: read back sync word */
@@ -503,6 +514,8 @@ int main(void)
              gz_tdps < 0 ? '-' : ' ', (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) / 10, (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) % 10);
       printf(" BARO   %d.%02u C    %lu Pa\r\n",
              temp_int, temp_frac, (unsigned long)telem.pressure_pa);
+      extern volatile uint32_t gps_isr_count;
+      printf(" ISR    %lu\r\n", gps_isr_count);
       if (last_gps_fix.valid) {
           printf(" GPS    %lu.%07lu %c   %lu.%07lu %c\r\n",
                  (unsigned long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
