@@ -411,7 +411,7 @@ int main(void)
       MS5607Update();
 
       /* === GPS Code === */
-      new_fix = {0};      // Clear temporary storage
+      new_fix = (GPS_RMC_t){0};      // Clear temporary storage
       if (GPS_pop(&new_fix)) last_gps_fix = new_fix;  // Update last_gps_fix only if a new fix was popped
 
       /* === RADIO MODE BEHAVIOR === */
