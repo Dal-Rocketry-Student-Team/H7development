@@ -86,20 +86,26 @@ static uint16_t telem_pkt_id = 0;       // Rolling counter
 // === GPS variables ===
 static GPS_RMC_t last_gps_fix = {0};   // storage for the most recent GPS fix, to be included in telemetry
 static GPS_RMC_t new_fix = {0};         // temporary storage for a newly popped GPS fix, to check if it's new before updating last_gps_fix
-int32_t lat_raw  = 0;
-int32_t lon_raw  = 0;
-char lat_hem     = 0;
-char lon_hem     = 0;
-
-uint32_t t  = 0;
-uint32_t d  = 0;
-uint32_t spd_ms_int  = 0;
-uint32_t spd_ms_frac = 0;
-uint32_t hdg_int     = 0;
-uint32_t hdg_frac    = 0;
-int16_t  temp_cdeg   = 0;
-int16_t  temp_int    = 0;
-uint16_t temp_frac   = 0;
+// === Debug display variables ===
+// Declared at file scope (static storage, .bss) so they are not re-allocated
+// on the stack every loop iteration.  All are recomputed from telem /
+// last_gps_fix each iteration and used only in the UART printf block.
+//
+// IMU — integer engineering units (no floating-point printf required):
+//   Accel: raw * 1000 / 2048  → milliG        (print as X.XXX g)
+//   Gyro:  raw * 10   / 164   → tenths of dps  (print as X.X dps)
+static int32_t  ax_mg,   ay_mg,   az_mg;          // accel in milli-g
+static int32_t  gx_tdps, gy_tdps, gz_tdps;        // gyro in tenths-dps
+// Baro
+static int16_t  temp_cdeg;   // temperature in centi-degrees (copy of telem field)
+static int16_t  temp_int;    // integer part of temperature in degrees
+static uint16_t temp_frac;   // fractional part (always positive, 2 digits)
+// GPS — sign/magnitude split for %lu.%07lu printing without %f
+static int32_t  lat_raw, lon_raw;    // absolute value copies for digit extraction
+static char     lat_hem, lon_hem;    // hemisphere characters ('N'/'S', 'E'/'W')
+static uint32_t gps_t, gps_d;       // utc_time and utc_date copies for unpacking
+static uint32_t spd_int, spd_frac;  // speed in m/s split at decimal point
+static uint32_t hdg_int, hdg_frac;  // heading in degrees split at decimal point
 
 
 /* USER CODE END PV */
@@ -435,52 +441,77 @@ int main(void)
 
       /* === Debug UART output === */
       /* Unpack GPS fields from integers for display — avoids %f and float printf */
-      lat_raw  = last_gps_fix.lat_e7;
-      lon_raw  = last_gps_fix.lon_e7;
-      lat_hem     = (lat_raw >= 0) ? 'N' : 'S';
-      lon_hem     = (lon_raw >= 0) ? 'E' : 'W';
+      ax_mg   = (int32_t)telem.ax * 1000 / 2048;
+      ay_mg   = (int32_t)telem.ay * 1000 / 2048;
+      az_mg   = (int32_t)telem.az * 1000 / 2048;
+      gx_tdps = (int32_t)telem.gx * 10 / 164;
+      gy_tdps = (int32_t)telem.gy * 10 / 164;
+      gz_tdps = (int32_t)telem.gz * 10 / 164;
+ 
+      temp_cdeg = telem.temperature_cdeg;
+      temp_int  = temp_cdeg / 100;
+      temp_frac = (uint16_t)((temp_cdeg < 0 ? -temp_cdeg : temp_cdeg) % 100);
+ 
+      lat_raw = last_gps_fix.lat_e7;
+      lon_raw = last_gps_fix.lon_e7;
+      lat_hem = (lat_raw >= 0) ? 'N' : 'S';
+      lon_hem = (lon_raw >= 0) ? 'E' : 'W';
       if (lat_raw < 0) lat_raw = -lat_raw;
       if (lon_raw < 0) lon_raw = -lon_raw;
  
-      t  = last_gps_fix.utc_time;
-      d  = last_gps_fix.utc_date;
-      spd_ms_int  = last_gps_fix.speed_cms / 100;
-      spd_ms_frac = last_gps_fix.speed_cms % 100;
-      hdg_int     = last_gps_fix.course_cd / 100;
-      hdg_frac    = last_gps_fix.course_cd % 100;
-      temp_cdeg   = telem.temperature_cdeg;
-      temp_int    = temp_cdeg / 100;
-      temp_frac   = (uint16_t)((temp_cdeg < 0 ? -temp_cdeg : temp_cdeg) % 100);
- 
-      printf("\r\n=== PKT #%04u | T+%lu ms ===\r\n", telem_pkt_id, telem.timestamp_ms);
-      printf("  IMU  | Ax:%6d  Ay:%6d  Az:%6d  |  Gx:%6d  Gy:%6d  Gz:%6d\r\n",
-             telem.ax, telem.ay, telem.az, telem.gx, telem.gy, telem.gz);
-      printf("  BARO | Temp: %d.%02u C  |  Press: %lu Pa\r\n",
-             temp_int, temp_frac, (unsigned long)telem.pressure_pa);
-      if (last_gps_fix.valid) {
-          printf("  GPS  | Lat: %ld.%07lu %c  Lon: %ld.%07lu %c\r\n",
-                 (long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
-                 (long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
-          printf("       | UTC: %02lu:%02lu:%02lu  Date: %02lu/%02lu/%02lu\r\n",
-                 t/10000, (t%10000)/100, t%100,
-                 d/10000, (d%10000)/100, d%100);
-          printf("       | Speed: %lu.%02lu m/s  Hdg: %lu.%02lu deg\r\n",
-                 spd_ms_int, spd_ms_frac, hdg_int, hdg_frac);
-      } else {
-          printf("  GPS  | No fix\r\n");
-      }
+      gps_t    = last_gps_fix.utc_time;
+      gps_d    = last_gps_fix.utc_date;
+      spd_int  = last_gps_fix.speed_cms / 100;
+      spd_frac = last_gps_fix.speed_cms % 100;
+      hdg_int  = last_gps_fix.course_cd / 100;
+      hdg_frac = last_gps_fix.course_cd % 100;
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
-      if (tx_rc == 0) {
-          printf("  TX #%u OK\r\n", telem_pkt_id);
+
+      /* === Debug UART output ===
+       * Layout mirrors the ground station receiver so both terminals look
+       * consistent when monitoring a test flight side by side.
+       * Border width: 44 chars to match ground station's === line. */
+      printf("\r\n==========================================\r\n");
+      printf(" PKT #%-5u  T+%lu ms   %u bytes\r\n",
+             telem_pkt_id, telem.timestamp_ms, (unsigned)sizeof(telem));
+      printf("------------------------------------------\r\n");
+      printf(" ACCEL  X=%c%lu.%03lu g  Y=%c%lu.%03lu g  Z=%c%lu.%03lu g\r\n",
+             ax_mg < 0 ? '-' : ' ', (unsigned long)(ax_mg < 0 ? -ax_mg : ax_mg) / 1000, (unsigned long)(ax_mg < 0 ? -ax_mg : ax_mg) % 1000,
+             ay_mg < 0 ? '-' : ' ', (unsigned long)(ay_mg < 0 ? -ay_mg : ay_mg) / 1000, (unsigned long)(ay_mg < 0 ? -ay_mg : ay_mg) % 1000,
+             az_mg < 0 ? '-' : ' ', (unsigned long)(az_mg < 0 ? -az_mg : az_mg) / 1000, (unsigned long)(az_mg < 0 ? -az_mg : az_mg) % 1000);
+      printf(" GYRO   X=%c%lu.%01lu dps Y=%c%lu.%01lu dps Z=%c%lu.%01lu dps\r\n",
+             gx_tdps < 0 ? '-' : ' ', (unsigned long)(gx_tdps < 0 ? -gx_tdps : gx_tdps) / 10, (unsigned long)(gx_tdps < 0 ? -gx_tdps : gx_tdps) % 10,
+             gy_tdps < 0 ? '-' : ' ', (unsigned long)(gy_tdps < 0 ? -gy_tdps : gy_tdps) / 10, (unsigned long)(gy_tdps < 0 ? -gy_tdps : gy_tdps) % 10,
+             gz_tdps < 0 ? '-' : ' ', (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) / 10, (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) % 10);
+      printf(" BARO   %d.%02u C    %lu Pa\r\n",
+             temp_int, temp_frac, (unsigned long)telem.pressure_pa);
+      if (last_gps_fix.valid) {
+          printf(" GPS    %lu.%07lu %c   %lu.%07lu %c\r\n",
+                 (unsigned long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
+                 (unsigned long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
+          printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n",
+                 gps_t/10000, (gps_t%10000)/100, gps_t%100,
+                 gps_d/10000, (gps_d%10000)/100, gps_d%100);
+          printf("        %lu.%02lu m/s   %lu.%02lu deg\r\n",
+                 spd_int, spd_frac, hdg_int, hdg_frac);
       } else {
-          printf("  TX #%u FAIL (rc=%d, err=0x%04X)\r\n", telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
+          printf(" GPS    No fix\r\n");
+      }
+
+      if (tx_rc == 0) {
+          printf("  TX    OK\r\n");
+      } else {
+          printf("  TX    FAIL (rc=%d, err=0x%04X)\r\n", tx_rc, SX1262_GetDeviceErrors());
           /* Try to recover */
           SX1262_ClearDeviceErrors();
           SX1262_ClearIrqStatus(SX1262_IRQ_ALL);
           SX1262_SetStandby(SX1262_STDBY_RC);
           HAL_Delay(100);
       }
+
+      printf("==========================================\r\n");
+
       telem_pkt_id++;   // increment packet ID for next transmission
 
       HAL_Delay(500);  /* 500ms between packets — easy to see on SDR */
