@@ -22,6 +22,7 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
+#include "GPS.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -80,6 +81,11 @@ lsm6dsv16x_data_ready_t drdy;     // data-ready flags to see if new data is avai
 // === Telemetry variables ===
 static rocket_telemetry_t telem = {0};   // creating an instance of the telemetry payload
 static uint16_t telem_pkt_id = 0;       // Rolling counter
+
+// === GPS variables ===
+static GPS_RMC_t last_gps_fix = {0};   // storage for the most recent GPS fix, to be included in telemetry
+static GPS_RMC_t new_fix = {0};         // temporary storage for a newly popped GPS fix, to check if it's new before updating last_gps_fix
+
 
 /* USER CODE END PV */
 
@@ -208,6 +214,8 @@ int main(void)
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  GPS_init();  // Initialize GPS (sets up UART receive interrupt)
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
@@ -381,8 +389,15 @@ int main(void)
       lsm6dsv16x_acceleration_raw_get(&lsm6dsv16x_ctx, accel_raw);
       lsm6dsv16x_angular_rate_raw_get(&lsm6dsv16x_ctx, gyro_raw);
 
-      /* === Barometer Code === */
+      /* === Barometer Code === 
+      GPS updates at ~1 Hz.  We poll every loop iteration and update
+      last_gps_fix only when a new fix arrives; otherwise the previous
+      fix is silently reused.  This keeps the loop fully non-blocking.*/
       MS5607Update();
+
+      /* === GPS Code === */
+      new_fix = {0};      // Clear temporary storage
+      if (GPS_pop(&new_fix)) last_gps_fix = new_fix;  // Update last_gps_fix only if a new fix was popped
 
       /* === RADIO MODE BEHAVIOR === */
       // Telemetry struct packing
@@ -393,11 +408,11 @@ int main(void)
       telem.az                  = accel_raw[2];           // raw accel counts
       telem.gx                  = gyro_raw[0];            // raw gyro counts (not converted to dps for simplicity)
       telem.gy                  = gyro_raw[1];            // raw gyro counts  
-      telem.gz                  = gyro_raw[2];            // raw gyro counts
-      telem.temperature_cdeg    = (int16_t)(MS5607GetTemperatureC()*100);  // baro temp in centi-degrees C (e.g. 2315 = 23.15 °C)
-      telem.pressure_pa         = MS5607GetPressurePa();  // raw pressure in Pa
-      telem.gps_lat             = 0.0f;                   // placeholder, set 0.0f until GPS ready
-      telem.gps_lon             = 0.0f;                   // placeholder, set 0.0f until GPS ready
+      telem.gz                  = gyro_raw[2];                                  // raw gyro counts
+      telem.temperature_cdeg    = (int16_t)(MS5607GetTemperatureC()*100);       // baro temp in centi-degrees C (e.g. 2315 = 23.15 °C)
+      telem.pressure_pa         = MS5607GetPressurePa();                        // raw pressure in Pa
+      telem.gps_lat             = last_gps_fix.lat_e7 / 1e7f;                   // gps converted to float degrees (e.g. 37.7749, which is positive for N latitude)
+      telem.gps_lon             = last_gps_fix.lon_e7 / 1e7f;                   // gps converted to float degrees (e.g. -122.4194, which is negative for W longitude)
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
       if (tx_rc == 0) {
