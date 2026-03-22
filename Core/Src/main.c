@@ -22,7 +22,6 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "GPS.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -36,6 +35,8 @@
 #include "sx1262.h"           // SX1262 LoRa driver header file
 #include "sx1262_hal.h"       // SX1262 hardware abstraction header file
 #include "telemetry.h"        // telemetry packet definitions
+#include "GPS.h"              // GPS parsing and circular buffer header file
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -85,6 +86,20 @@ static uint16_t telem_pkt_id = 0;       // Rolling counter
 // === GPS variables ===
 static GPS_RMC_t last_gps_fix = {0};   // storage for the most recent GPS fix, to be included in telemetry
 static GPS_RMC_t new_fix = {0};         // temporary storage for a newly popped GPS fix, to check if it's new before updating last_gps_fix
+int32_t lat_raw  = 0;
+int32_t lon_raw  = 0;
+char lat_hem     = 0;
+char lon_hem     = 0;
+
+uint32_t t  = 0;
+uint32_t d  = 0;
+uint32_t spd_ms_int  = 0;
+uint32_t spd_ms_frac = 0;
+uint32_t hdg_int     = 0;
+uint32_t hdg_frac    = 0;
+int16_t  temp_cdeg   = 0;
+int16_t  temp_int    = 0;
+uint16_t temp_frac   = 0;
 
 
 /* USER CODE END PV */
@@ -413,12 +428,53 @@ int main(void)
       telem.pressure_pa         = MS5607GetPressurePa();                        // raw pressure in Pa
       telem.gps_lat             = last_gps_fix.lat_e7 / 1e7f;                   // gps converted to float degrees (e.g. 37.7749, which is positive for N latitude)
       telem.gps_lon             = last_gps_fix.lon_e7 / 1e7f;                   // gps converted to float degrees (e.g. -122.4194, which is negative for W longitude)
+      telem.gps_utc_time        = last_gps_fix.utc_time;                        // gps utc time in hhmmss format, e.g. 231523 means 23:15:23 UTC
+      telem.gps_utc_date        = last_gps_fix.utc_date;                        // gps utc date in ddmmyy format, e.g. 150623 means 15 June 2023
+      telem.gps_speed_cms       = last_gps_fix.speed_cms;                       // gps speed in cm/s, e.g. 5144 means 51.44 cm/s
+      telem.gps_course_cd       = last_gps_fix.course_cd;                       // gps course over ground in centidegrees, e.g. 12345 means 123.45°
+
+      /* === Debug UART output === */
+      /* Unpack GPS fields from integers for display — avoids %f and float printf */
+      lat_raw  = last_gps_fix.lat_e7;
+      lon_raw  = last_gps_fix.lon_e7;
+      lat_hem     = (lat_raw >= 0) ? 'N' : 'S';
+      lon_hem     = (lon_raw >= 0) ? 'E' : 'W';
+      if (lat_raw < 0) lat_raw = -lat_raw;
+      if (lon_raw < 0) lon_raw = -lon_raw;
+ 
+      t  = last_gps_fix.utc_time;
+      d  = last_gps_fix.utc_date;
+      spd_ms_int  = last_gps_fix.speed_cms / 100;
+      spd_ms_frac = last_gps_fix.speed_cms % 100;
+      hdg_int     = last_gps_fix.course_cd / 100;
+      hdg_frac    = last_gps_fix.course_cd % 100;
+      temp_cdeg   = telem.temperature_cdeg;
+      temp_int    = temp_cdeg / 100;
+      temp_frac   = (uint16_t)((temp_cdeg < 0 ? -temp_cdeg : temp_cdeg) % 100);
+ 
+      printf("\r\n=== PKT #%04u | T+%lu ms ===\r\n", telem_pkt_id, telem.timestamp_ms);
+      printf("  IMU  | Ax:%6d  Ay:%6d  Az:%6d  |  Gx:%6d  Gy:%6d  Gz:%6d\r\n",
+             telem.ax, telem.ay, telem.az, telem.gx, telem.gy, telem.gz);
+      printf("  BARO | Temp: %d.%02u C  |  Press: %lu Pa\r\n",
+             temp_int, temp_frac, (unsigned long)telem.pressure_pa);
+      if (last_gps_fix.valid) {
+          printf("  GPS  | Lat: %ld.%07lu %c  Lon: %ld.%07lu %c\r\n",
+                 (long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
+                 (long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
+          printf("       | UTC: %02lu:%02lu:%02lu  Date: %02lu/%02lu/%02lu\r\n",
+                 t/10000, (t%10000)/100, t%100,
+                 d/10000, (d%10000)/100, d%100);
+          printf("       | Speed: %lu.%02lu m/s  Hdg: %lu.%02lu deg\r\n",
+                 spd_ms_int, spd_ms_frac, hdg_int, hdg_frac);
+      } else {
+          printf("  GPS  | No fix\r\n");
+      }
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
       if (tx_rc == 0) {
-          printf("TX #%u OK\r\n", telem_pkt_id);
+          printf("  TX #%u OK\r\n", telem_pkt_id);
       } else {
-          printf("TX #%u FAIL (rc=%d, err=0x%04X)\r\n", telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
+          printf("  TX #%u FAIL (rc=%d, err=0x%04X)\r\n", telem_pkt_id, tx_rc, SX1262_GetDeviceErrors());
           /* Try to recover */
           SX1262_ClearDeviceErrors();
           SX1262_ClearIrqStatus(SX1262_IRQ_ALL);

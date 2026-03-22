@@ -75,10 +75,14 @@ typedef struct __attribute__((packed)) {
     int32_t pressure_pa;            // barometer pressure reading
     float gps_lat;                  // gps latitude reading, leave it as 0.0 until gps configured
     float gps_lon;                  // gps longitude reading, leave it as 0.0 until gps configured
+    uint32_t gps_utc_time;          // gps utc time in hhmmss format, e.g. 231523 means 23:15:23 UTC
+    uint32_t gps_utc_date;          // gps utc date in ddmmyy format, e.g. 150623 means 15 June 2023
+    uint16_t gps_speed_cms;         // gps speed in cm/s, e.g. 5144 means 51.44 cm/s
+    uint16_t gps_course_cd;         // gps course over ground in centidegrees, e.g. 12345 means 123.45°
 } rocket_telemetry_t;
 
 /* Compile time size guard. If padding is added to the data packet, compilation will fail */
-_Static_assert(sizeof(rocket_telemetry_t) == 32, "rocket_telemetry_t must be exactly 32 bytes — check packing!");
+_Static_assert(sizeof(rocket_telemetry_t) == 44, "rocket_telemetry_t must be exactly 44 bytes — check packing!");
 
 /*
 Ground uplink command packet (ground → rocket) — fits in 40-byte RX region
