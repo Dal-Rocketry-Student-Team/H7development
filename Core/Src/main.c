@@ -239,34 +239,6 @@ int main(void)
 
   GPS_init();  // Initialize GPS (sets up UART receive interrupt)
 
-  // TEMPORARY DIAGNOSTIC — remove after confirming UART reception.
-  // Bypasses HAL entirely and reads directly from the USART1 peripheral
-  // registers for 5 seconds, forwarding every byte raw to Putty via UART5.
-  //
-  // USART1->ISR bit 5 (RXNE/RXFNE): set by hardware when the receive data
-  // register contains a new byte.  Reading USART1->RDR clears it automatically.
-  // This path has zero dependence on HAL, NVIC, or DMA — if data appears here
-  // the peripheral is alive and the issue is purely in the interrupt layer.
-  //
-  // What to expect in Putty:
-  //   Clean $GNRMC,... sentences  -> peripheral is alive, HAL/NVIC was the issue
-  //   Garbage / framing errors    -> baud rate still wrong in CubeMX
-  //   Nothing at all              -> wiring fault, GPS not powered, or wrong pin
-  {
-      uint8_t b;
-      uint32_t deadline = HAL_GetTick() + 5000;
-      printf("\r\n--- RAW USART1 register dump (5s) ---\r\n");
-      while (HAL_GetTick() < deadline) {
-          // Poll RXNE (bit 5) directly — no HAL, no interrupts, no DMA
-          if (USART1->ISR & USART_ISR_RXNE_RXFNE) {
-              b = (uint8_t)(USART1->RDR & 0xFF);  // reading RDR clears RXNE automatically
-              HAL_UART_Transmit(&huart5, &b, 1, HAL_MAX_DELAY);
-          }
-      }
-      printf("\r\n--- END ---\r\n");
-      GPS_init(); // re-arm the interrupt after the polling diagnostic
-  }
-
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
 
