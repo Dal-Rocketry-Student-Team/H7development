@@ -86,6 +86,7 @@ static uint16_t telem_pkt_id = 0;       // Rolling counter
 // === GPS variables ===
 static GPS_RMC_t last_gps_fix = {0};   // storage for the most recent GPS fix, to be included in telemetry
 static GPS_RMC_t new_fix = {0};         // temporary storage for a newly popped GPS fix, to check if it's new before updating last_gps_fix
+static GPS_status_t gps_status = {0};   // live acquisition status: fix type, satellites in use, satellites in view
 // === Debug display variables ===
 // Declared at file scope (static storage, .bss) so they are not re-allocated
 // on the stack every loop iteration.  All are recomputed from telem /
@@ -447,6 +448,7 @@ int main(void)
       /* === GPS Code === */
       new_fix = (GPS_RMC_t){0};      // Clear temporary storage
       if (GPS_pop(&new_fix)) last_gps_fix = new_fix;  // Update last_gps_fix only if a new fix was popped
+      GPS_GetStatus(&gps_status);    // Snapshot current acquisition state (fix type, sats in use/view)
 
       /* === RADIO MODE BEHAVIOR === */
       // Telemetry struct packing
@@ -514,9 +516,12 @@ int main(void)
              gz_tdps < 0 ? '-' : ' ', (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) / 10, (unsigned long)(gz_tdps < 0 ? -gz_tdps : gz_tdps) % 10);
       printf(" BARO   %d.%02u C    %lu Pa\r\n",
              temp_int, temp_frac, (unsigned long)telem.pressure_pa);
-      extern volatile uint32_t gps_isr_count;
-      printf(" ISR    %lu\r\n", gps_isr_count);
+      /* GPS — three states shown:
+       *   No signal  → fix_type 1, nothing visible     (antenna issue / deep indoors)
+       *   Searching  → fix_type 1, satellites in view  (acquiring, needs more time/sky)
+       *   Fix        → fix_type 2 or 3, full position  (2D = altitude unreliable) */
       if (last_gps_fix.valid) {
+          const char *fix_str = (gps_status.fix_type == 3) ? "3D" : "2D";
           printf(" GPS    %lu.%07lu %c   %lu.%07lu %c\r\n",
                  (unsigned long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
                  (unsigned long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
@@ -525,8 +530,12 @@ int main(void)
                  gps_d/10000, (gps_d%10000)/100, gps_d%100);
           printf("        %lu.%02lu m/s   %lu.%02lu deg\r\n",
                  spd_int, spd_frac, hdg_int, hdg_frac);
+          printf("        %s fix | %u used / %u in view\r\n",
+                 fix_str, gps_status.sats_in_use, gps_status.sats_in_view);
+      } else if (gps_status.sats_in_view == 0) {
+          printf(" GPS    No signal\r\n");
       } else {
-          printf(" GPS    No fix\r\n");
+          printf(" GPS    Searching | %u in view\r\n", gps_status.sats_in_view);
       }
 
       if (tx_rc == 0) {

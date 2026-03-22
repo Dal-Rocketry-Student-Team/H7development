@@ -16,6 +16,21 @@ typedef struct
 static GPS_circular_buffer_t gps_cbuf;
 
 /* -----------------------------------------------------------------------
+ * GPS acquisition status — updated from GNGSA and GSV sentences in ISR.
+ * fix_type and sats_in_use come from GNGSA; sats_in_view from GPGSV+GLGSV.
+ * ----------------------------------------------------------------------- */
+static GPS_status_t gps_status;
+
+/* Per-constellation satellite-in-view counts, summed into gps_status.sats_in_view.
+ * Kept separate so each talker sentence updates only its own slot. */
+static uint8_t gps_sv_count = 0;   // from $GPGSV field 3
+static uint8_t glo_sv_count = 0;   // from $GLGSV field 3
+
+/* Set to 1 after each RMC sentence so the next GSA resets the sats_in_use
+ * accumulator, correctly summing across multiple GNGSA sentences per cycle. */
+static uint8_t gsa_reset_pending = 1;
+
+/* -----------------------------------------------------------------------
  * Internal helpers
  * ----------------------------------------------------------------------- */
 
@@ -38,6 +53,80 @@ static float parse_field_float(const char **pp)
     }
     *pp = p;
     return int_part + frac;
+}
+
+/* Parse a GNGSA sentence — updates gps_status.fix_type and sats_in_use.
+ *
+ * GNGSA field layout:
+ *   0  $GNGSA
+ *   1  A/M        Auto/manual selection
+ *   2  1/2/3      Fix type: 1=no fix, 2=2D, 3=3D
+ *   3–14          PRN numbers of satellites used (empty slot = unused)
+ *   15  PDOP
+ *   16  HDOP
+ *   17  VDOP
+ *
+ * The CAM-M8 outputs one GNGSA per active constellation per cycle.
+ * gsa_reset_pending ensures we accumulate across all of them before
+ * the next RMC resets the counter. */
+static void parse_gsa_fast(const char *line)
+{
+    const char *f[18];
+    uint8_t nf = 0;
+    f[nf++] = line;
+    for (const char *p = line; *p && *p != '*' && nf < 18; p++) {
+        if (*p == ',')
+            f[nf++] = p + 1;
+    }
+    if (nf < 15)
+        return;
+
+    /* Fix type */
+    gps_status.fix_type = (uint8_t)(f[2][0] - '0');  /* '1', '2', or '3' */
+
+    /* Count non-empty PRN slots (fields 3–14) */
+    if (gsa_reset_pending) {
+        gps_status.sats_in_use = 0;
+        gsa_reset_pending = 0;
+    }
+    for (uint8_t i = 3; i <= 14 && i < nf; i++) {
+        if (f[i][0] >= '0' && f[i][0] <= '9')
+            gps_status.sats_in_use++;
+    }
+}
+
+/* Parse a GPGSV or GLGSV sentence — updates gps_status.sats_in_view.
+ *
+ * GSV field layout:
+ *   0  $GPGSV / $GLGSV
+ *   1  Total number of GSV messages this cycle
+ *   2  This message number (1-based)
+ *   3  Total satellites in view for this constellation
+ *
+ * We read field 3 from every GSV sentence because it contains the same
+ * total regardless of which message in the sequence this is. */
+static void parse_gsv_fast(const char *line)
+{
+    /* Walk to the third comma to reach field 3 */
+    const char *p = line;
+    uint8_t commas = 0;
+    while (*p && commas < 3) {
+        if (*p++ == ',') commas++;
+    }
+    if (commas < 3)
+        return;
+
+    uint8_t count = 0;
+    while (*p >= '0' && *p <= '9')
+        count = (uint8_t)(count * 10u + (uint8_t)(*p++ - '0'));
+
+    /* line[2] distinguishes talker: 'P' = GPS, 'L' = GLONASS */
+    if (line[2] == 'P')
+        gps_sv_count = count;
+    else if (line[2] == 'L')
+        glo_sv_count = count;
+
+    gps_status.sats_in_view = gps_sv_count + glo_sv_count;
 }
 
 /* Parse a GNRMC sentence into a GPS_RMC_t.
@@ -169,14 +258,24 @@ void GPS_push_line(const char *line, int length)
 {
     if (length < 7)
         return;
-    if (memcmp(line, "$GNRMC", 6) != 0)
-        return;
 
-    GPS_RMC_t fix;
-    if (!parse_rmc_fast(line, &fix))
-        return;
+    if (memcmp(line, "$GNRMC", 6) == 0) {
+        /* Position / velocity / time — push to circular buffer if fix is valid.
+         * Also mark that the next GSA sentence should reset the sats_in_use
+         * accumulator, starting a fresh count for the new NMEA cycle. */
+        GPS_RMC_t fix;
+        if (parse_rmc_fast(line, &fix))
+            gps_cbuf_push_isr(&fix);
+        gsa_reset_pending = 1;
 
-    gps_cbuf_push_isr(&fix);
+    } else if (memcmp(line, "$GNGSA", 6) == 0) {
+        /* Dilution of precision + active satellites — updates fix_type and sats_in_use */
+        parse_gsa_fast(line);
+
+    } else if (memcmp(line, "$GPGSV", 6) == 0 || memcmp(line, "$GLGSV", 6) == 0) {
+        /* Satellites in view — updates sats_in_view */
+        parse_gsv_fast(line);
+    }
 }
 
 void GPS_init(void)
@@ -195,4 +294,14 @@ uint8_t GPS_pop(GPS_RMC_t *out)
     *out = gps_cbuf.buffer[gps_cbuf.tail];
     gps_cbuf.tail = (gps_cbuf.tail + 1) % GPS_BUFFER_MAX_SIZE;
     return 1;
+}
+
+/* Returns a snapshot of the current GPS acquisition status.
+ * All fields are uint8_t — single-byte reads are atomic on Cortex-M,
+ * so no critical section is needed. */
+void GPS_GetStatus(GPS_status_t *out)
+{
+    out->fix_type     = gps_status.fix_type;
+    out->sats_in_use  = gps_status.sats_in_use;
+    out->sats_in_view = gps_status.sats_in_view;
 }
