@@ -238,6 +238,23 @@ int main(void)
 
   GPS_init();  // Initialize GPS (sets up UART receive interrupt)
 
+  // TEMPORARY DIAGNOSTIC — remove after confirming UART reception
+  // Polls USART1 for 5 seconds and dumps everything raw to Putty.
+  // If you see garbage: baud rate mismatch.
+  // If you see clean $GNRMC sentences with V: working UART, no satellite fix.
+  // If you see nothing: wiring or CubeMX peripheral enable issue.
+  {
+      uint8_t b;
+      uint32_t deadline = HAL_GetTick() + 5000;
+      printf("\r\n--- RAW USART1 (5s) ---\r\n");
+      while (HAL_GetTick() < deadline) {
+          if (HAL_UART_Receive(&huart1, &b, 1, 10) == HAL_OK)
+              HAL_UART_Transmit(&huart5, &b, 1, HAL_MAX_DELAY);
+      }
+      printf("\r\n--- END RAW ---\r\n");
+      GPS_init(); // re-arm the interrupt after the polling diagnostic
+  }
+
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_Base_Start_IT(&htim3);      // start periodic update IRQ
 
