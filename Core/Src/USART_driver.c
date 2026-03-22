@@ -2,6 +2,7 @@
 #include "GPS.h"
 #include "usart.h"
 #include <string.h>
+#include <stdio.h>
 
 /*variable definitions for GPS data reception */
 static volatile uint8_t gps_rx_ch = 0;
@@ -39,7 +40,22 @@ void receive_host_message(char *buffer, int max_len)
 
 void GPS_arm_receive_interrupt(void)
 {
-    HAL_UART_Receive_IT(&huart1, &gps_rx_ch, 1);
+    /* If the UART handle was left in a busy/error state (e.g. after an
+     * overrun), reset it before re-arming so HAL_UART_Receive_IT doesn't
+     * silently return HAL_BUSY and leave the interrupt disarmed. */
+    if (huart1.RxState != HAL_UART_STATE_READY) {
+        __HAL_UART_CLEAR_OREFLAG(&huart1);
+        huart1.RxState   = HAL_UART_STATE_READY;
+        huart1.ErrorCode = HAL_UART_ERROR_NONE;
+    }
+
+    HAL_StatusTypeDef rc = HAL_UART_Receive_IT(&huart1, &gps_rx_ch, 1);
+    if (rc != HAL_OK) {
+        char dbg[64];
+        snprintf(dbg, sizeof(dbg), "[GPS] Receive_IT failed: rc=%d state=%lu err=%lu\r\n",
+                 rc, (unsigned long)huart1.gState, (unsigned long)huart1.ErrorCode);
+        send_host_message(dbg);
+    }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
