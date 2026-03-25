@@ -49,17 +49,6 @@
 
 /*
 -----------------------------------------------------------------------
-SX1262 FIFO buffer base addresses
-Must match SX1262_TX_BASE / SX1262_RX_BASE in sx1262.h and the call to
-SetBufferBaseAddress() at init time.
------------------------------------------------------------------------ 
-*/
-
-#define TELEMETRY_TX_BASE 0x00u     /* 0 decimal */
-#define TELEMETRY_RX_BASE 0xD8u     /* 216 decimal */
-
-/*
------------------------------------------------------------------------
 Telemetry downlink packet (rocket → ground)
 
 __attribute__((packed)) tells GCC not to insert any padding bytes between
