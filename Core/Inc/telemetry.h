@@ -2,7 +2,7 @@
  * @file    telemetry.h
  * @brief   Rocket telemetry packet definition for LoRa downlink.
  *
- * Packet layout (32 bytes total, packed):
+ * Packet layout (52 bytes total, packed):
  *
  *   Offset  Field              Type      Bytes  Notes
  *   ------  -----------------  --------  -----  --------------------------------
@@ -15,9 +15,17 @@
  *   14      gy                 int16_t    2
  *   16      gz                 int16_t    2
  *   18      temperature_cdeg   int16_t    2     Baro temp × 100  (e.g. 2315 = 23.15 °C)
- *   20      pressure_Pa        int32_t    4     Raw pressure in Pascal
- *   24      gps_lat            float      4     GPS latitude  — placeholder, set 0.0f until GPS ready
- *   28      gps_lon            float      4     GPS longitude — placeholder, set 0.0f until GPS ready
+ *   20      pressure_pa        int32_t    4     Raw pressure in Pascal
+ *   24      gps_lat            float      4     Latitude  in decimal degrees (negative = South)
+ *   28      gps_lon            float      4     Longitude in decimal degrees (negative = West)
+ *   32      gps_utc_time       uint32_t   4     UTC time packed as HHMMSS  (e.g. 143022 = 14:30:22)
+ *   36      gps_utc_date       uint32_t   4     UTC date packed as DDMMYY  (e.g. 210326 = 21 Mar 2026)
+ *   40      gps_speed_cms      uint16_t   2     Speed over ground in cm/s  (divide by 100 for m/s)
+ *   42      gps_course_cd      uint16_t   2     Course over ground in centidegrees (divide by 100 for °)
+ *   44      gps_alt_cm         int32_t    4     GPS altitude above MSL in cm (divide by 100 for m)
+ *   48      gps_hdop           uint16_t   2     HDOP × 100 (e.g. 120 = 1.20 — lower is better)
+ *   50      gps_sats           uint8_t    1     Satellites used in fix (from $GNGGA field 7)
+ *   51      gps_fix_type       uint8_t    1     Fix quality: 0=no fix, 1=GPS, 2=DGPS (from $GNGGA field 6)
  *
  * Altitude is intentionally omitted from the packet.  The ground station has
  * its own MS5607 reading local pressure and temperature at the launch site.
@@ -38,17 +46,6 @@
 #define TELEMETRY_H
 
 #include <stdint.h>
-
-/*
------------------------------------------------------------------------
-SX1262 FIFO buffer base addresses
-Must match SX1262_TX_BASE / SX1262_RX_BASE in sx1262.h and the call to
-SetBufferBaseAddress() at init time.
------------------------------------------------------------------------ 
-*/
-
-#define TELEMETRY_TX_BASE 0x00u     /* 0 decimal */
-#define TELEMETRY_RX_BASE 0xD8u     /* 216 decimal */
 
 /*
 -----------------------------------------------------------------------
@@ -79,10 +76,14 @@ typedef struct __attribute__((packed)) {
     uint32_t gps_utc_date;          // gps utc date in ddmmyy format, e.g. 150623 means 15 June 2023
     uint16_t gps_speed_cms;         // gps speed in cm/s, e.g. 5144 means 51.44 cm/s
     uint16_t gps_course_cd;         // gps course over ground in centidegrees, e.g. 12345 means 123.45°
+    int32_t  gps_alt_cm;            // GPS altitude above MSL in cm (divide by 100 for m)
+    uint16_t gps_hdop;              // HDOP × 100 (e.g. 120 = 1.20 — lower is more accurate)
+    uint8_t  gps_sats;              // satellites used in fix (from $GNGGA field 7)
+    uint8_t  gps_fix_type;          // fix quality: 0=no fix, 1=GPS, 2=DGPS (from $GNGGA field 6)
 } rocket_telemetry_t;
 
 /* Compile time size guard. If padding is added to the data packet, compilation will fail */
-_Static_assert(sizeof(rocket_telemetry_t) == 44, "rocket_telemetry_t must be exactly 44 bytes — check packing!");
+_Static_assert(sizeof(rocket_telemetry_t) == 52, "rocket_telemetry_t must be exactly 52 bytes — check packing!");
 
 /*
 Ground uplink command packet (ground → rocket) — fits in 40-byte RX region

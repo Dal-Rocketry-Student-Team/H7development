@@ -91,14 +91,16 @@ sx1262_pkt_status_t pkt_status = {0};
 static float gs_temp_c     = 15.0f;    // initialised to ISA standard, overwritten immediately
 static float gs_pressure_pa = 101325.0f;
 
-// === GPS RX variables ===
-// Decode GPS fields — unpack packed integer time/date and scale speed/heading
-uint32_t gps_t;                 // HHMMSS packed integer
-uint32_t gps_d;                 // DDMMYY packed integer
-float    spd_ms;       // cm/s -> m/s
-float    hdg_deg;       // centidegrees -> degrees
-// Rocket sends 0.0f for lat/lon when there is no fix (zero-initialised struct)
-uint8_t  has_fix;
+// === GPS RX decode variables ===
+// Declared at file scope so they are not reallocated on the stack every loop iteration.
+// All are assigned from the received packet each time a valid packet arrives.
+uint32_t gps_t;     // UTC time: HHMMSS packed integer  (e.g. 143022 = 14:30:22)
+uint32_t gps_d;     // UTC date: DDMMYY packed integer  (e.g. 210326 = 21 Mar 2026)
+float    spd_ms;    // speed over ground in m/s  (converted from gps_speed_cms / 100)
+float    hdg_deg;   // course over ground in degrees  (converted from gps_course_cd / 100)
+float    gps_alt;   // GPS altitude above MSL in metres  (converted from gps_alt_cm / 100)
+float    hdop;      // Horizontal Dilution of Precision  (converted from gps_hdop / 100)
+uint8_t  has_fix;   // 1 if lat/lon are non-zero (valid fix), 0 otherwise
 
 /* USER CODE END PV */
 
@@ -292,7 +294,7 @@ int main(void)
       uint8_t status = SX1262_GetStatus();
       sx1262_status_t decoded;
       SX1262_DecodeStatus(status, &decoded);
-      printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n",
+      printf("  -> Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n",
             status, decoded.cmd_status, decoded.chip_mode);
   }
 
@@ -332,7 +334,7 @@ int main(void)
     uint8_t status = SX1262_GetStatus();
     sx1262_status_t decoded;
     SX1262_DecodeStatus(status, &decoded);
-    printf("  → Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
+    printf("  -> Status: 0x%02X | Cmd Status: 0x%X, Chip Mode: 0x%X\r\n", status, decoded.cmd_status, decoded.chip_mode);
   }
 
   /* Quick sanity: read back sync word */
@@ -383,17 +385,19 @@ int main(void)
             rocket_telemetry_t *p = (rocket_telemetry_t *)rx_buf;
 
             // Decode baro fields from the RX message
-            float rkt_temp_c = p->temperature_cdeg / 100.0f; // convert from centi-degrees to degrees
-            float rkt_press_pa = p->pressure_pa;
+            float rkt_temp_c    = p->temperature_cdeg / 100.0f; // convert from centi-degrees to degrees
+            float rkt_press_pa  = p->pressure_pa;
 
             // Calculate altitude AGL using the ground station as reference
             float altitude_m = calculate_altitude_m(rkt_press_pa, gs_pressure_pa, gs_temp_c);
 
             // Decode GPS fields — unpack packed integer time/date and scale speed/heading
-            gps_t   = p->gps_utc_time;                 // HHMMSS packed integer
-            gps_d   = p->gps_utc_date;                 // DDMMYY packed integer
-            spd_ms  = p->gps_speed_cms / 100.0f;       // cm/s -> m/s
-            hdg_deg = p->gps_course_cd / 100.0f;       // centidegrees -> degrees
+            gps_t   = p->gps_utc_time;                // HHMMSS packed integer
+            gps_d   = p->gps_utc_date;                // DDMMYY packed integer
+            spd_ms  = p->gps_speed_cms / 100.0f;      // cm/s -> m/s
+            hdg_deg = p->gps_course_cd / 100.0f;      // centidegrees -> degrees
+            gps_alt  = p->gps_alt_cm / 100.0f;        // cm -> m
+            hdop     = p->gps_hdop / 100.0f;          // HDOP × 100 -> HDOP
             // Rocket sends 0.0f for lat/lon when there is no fix (zero-initialised struct)
             has_fix = (p->gps_lat != 0.0f || p->gps_lon != 0.0f);
 
@@ -401,21 +405,20 @@ int main(void)
             printf("\r\n===========================================\r\n");
 
             printf(" PKT #%-5u  T+%lu ms\r\n", p->packet_id, p->timestamp_ms);
-            printf(" Sig_RSSI=%d dBm | RSSI=%d dBm | SNR=%d dB\r\n", pkt_status.signal_rssi, pkt_status.rssi_pkt, pkt_status.snr_pkt);
+            printf(" Sig_RSSI=%d dBm  RSSI=%d dBm  SNR=%d dBm\r\n", pkt_status.signal_rssi, pkt_status.rssi_pkt, pkt_status.snr_pkt);
             printf("------------------------------------------\r\n");
-            printf(" ALT      %8.1f m AGL\r\n", altitude_m);
+                        printf(" ALT BARO %8.1f m AGL\r\n", altitude_m);
             printf(" BARO RKT   %6.2f C    %7.0f Pa\r\n", rkt_temp_c, rkt_press_pa);
             printf(" BARO GND   %6.2f C    %7.0f Pa\r\n", gs_temp_c, gs_pressure_pa);
-            printf(" ACCEL  X=%5.3f g Y=%5.3f g Z=%5.3f g\r\n",
-                   p->ax / 2048.0f, p->ay / 2048.0f, p->az / 2048.0f);
-            printf(" GYRO   X=%4.1f dps Y=%4.1f dps Z=%4.1f dps\r\n",
-                   p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
+            printf(" ACCEL  X=%5.3f g Y=%5.3f g Z=%5.3f g\r\n", p->ax / 2048.0f, p->ay / 2048.0f, p->az / 2048.0f);
+            printf(" GYRO   X=%4.1f dps Y=%4.1f dps Z=%4.1f dps\r\n", p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
             if (has_fix) {
+                const char *fix_str = (p->gps_fix_type == 2) ? "DGPS" : "GPS";
                 printf(" GPS   lat=%.6f  lon=%.6f\r\n", p->gps_lat, p->gps_lon);
-                printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n",
-                       gps_t/10000, (gps_t%10000)/100, gps_t%100,
-                       gps_d/10000, (gps_d%10000)/100, gps_d%100);
+                printf("        Alt: %.2f m MSL   HDOP: %.2f\r\n", gps_alt, hdop);
+                printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n", gps_t/10000, (gps_t%10000)/100, gps_t%100, gps_d/10000, (gps_d%10000)/100, gps_d%100);
                 printf("        %.2f m/s   %.2f deg\r\n", spd_ms, hdg_deg);
+                printf("        %s fix | %u sats\r\n", fix_str, p->gps_sats);
             } else {
                 printf(" GPS    No fix\r\n");
 
