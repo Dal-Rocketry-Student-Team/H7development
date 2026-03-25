@@ -55,6 +55,68 @@ static float parse_field_float(const char **pp)
     return int_part + frac;
 }
 
+/* Parse a GNGGA sentence — updates altitude, HDOP, fix quality, and sats_in_use.
+ *
+ * GNGGA field layout:
+ *   0  $GNGGA
+ *   1  HHMMSS.SS   UTC time
+ *   2  DDMM.MMMMM  Latitude
+ *   3  N/S
+ *   4  DDDMM.MMMMM Longitude
+ *   5  E/W
+ *   6  Fix quality: 0 = no fix, 1 = GPS, 2 = DGPS
+ *   7  Satellites in use (integer)
+ *   8  HDOP (e.g. 1.20)
+ *   9  MSL altitude (metres, e.g. 123.4)
+ *  10  M (unit)
+ *  11  Geoid separation (not needed)
+ *
+ * GGA is the only NMEA sentence that carries altitude and HDOP.
+ * When there is no fix, fields 2-9 are empty — we guard with digit checks. */
+static void parse_gga_fast(const char *line)
+{
+    const char *f[12];
+    uint8_t nf = 0;
+    f[nf++] = line;
+    for (const char *p = line; *p && *p != '*' && nf < 12; p++) {
+        if (*p == ',')
+            f[nf++] = p + 1;
+    }
+    if (nf < 10)
+        return;
+
+    /* Field 6: fix quality (single digit: '0', '1', or '2') */
+    gps_status.gga_quality = (f[6][0] >= '0' && f[6][0] <= '2') ? (uint8_t)(f[6][0] - '0') : 0;
+
+    /* Field 7: satellites in use (1–2 digit integer) */
+    {
+        const char *p = f[7];
+        uint8_t n = 0;
+        while (*p >= '0' && *p <= '9')
+            n = (uint8_t)(n * 10u + (uint8_t)(*p++ - '0'));
+        gps_status.gga_sats = n;
+    }
+
+    /* Field 8: HDOP — store as integer × 100 to avoid float in status struct.
+     * parse_field_float advances past the decimal, we then round to uint16. */
+    {
+        const char *p = f[8];
+        float hdop = parse_field_float(&p);
+        gps_status.hdop_c = (uint16_t)(hdop * 100.0f + 0.5f); /* +0.5 for rounding */
+    }
+
+    /* Field 9: MSL altitude in metres — store as centimetres (int32).
+     * Empty when fix_quality == 0; guard with digit or '-' check. */
+    {
+        const char *p = f[9];
+        if ((*p >= '0' && *p <= '9') || *p == '-') {
+            float alt_m = parse_field_float(&p);
+            gps_status.alt_cm = (int32_t)(alt_m * 100.0f);
+        }
+        /* If field is empty, leave alt_cm unchanged from last good reading */
+    }
+}
+
 /* Parse a GNGSA sentence — updates gps_status.fix_type and sats_in_use.
  *
  * GNGSA field layout:
@@ -264,6 +326,10 @@ void GPS_push_line(const char *line, int length)
             gps_cbuf_push_isr(&fix);
         gsa_reset_pending = 1;
 
+    } else if (memcmp(line, "$GNGGA", 6) == 0) {
+        /* Fix data — the only source of GPS altitude and HDOP */
+        parse_gga_fast(line);
+
     } else if (memcmp(line, "$GNGSA", 6) == 0) {
         /* Dilution of precision + active satellites — updates fix_type and sats_in_use */
         parse_gsa_fast(line);
@@ -300,4 +366,8 @@ void GPS_GetStatus(GPS_status_t *out)
     out->fix_type     = gps_status.fix_type;
     out->sats_in_use  = gps_status.sats_in_use;
     out->sats_in_view = gps_status.sats_in_view;
+    out->gga_quality  = gps_status.gga_quality;
+    out->gga_sats     = gps_status.gga_sats;
+    out->alt_cm       = gps_status.alt_cm;
+    out->hdop_c       = gps_status.hdop_c;
 }

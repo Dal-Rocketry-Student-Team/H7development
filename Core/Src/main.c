@@ -87,6 +87,7 @@ static uint16_t telem_pkt_id = 0;       // Rolling counter
 static GPS_RMC_t last_gps_fix = {0};   // storage for the most recent GPS fix, to be included in telemetry
 static GPS_RMC_t new_fix = {0};         // temporary storage for a newly popped GPS fix, to check if it's new before updating last_gps_fix
 static GPS_status_t gps_status = {0};   // live acquisition status: fix type, satellites in use, satellites in view
+
 // === Debug display variables ===
 // Declared at file scope (static storage, .bss) so they are not re-allocated
 // on the stack every loop iteration.  All are recomputed from telem /
@@ -107,7 +108,10 @@ static char     lat_hem, lon_hem;    // hemisphere characters ('N'/'S', 'E'/'W')
 static uint32_t gps_t, gps_d;       // utc_time and utc_date copies for unpacking
 static uint32_t spd_int, spd_frac;  // speed in m/s split at decimal point
 static uint32_t hdg_int, hdg_frac;  // heading in degrees split at decimal point
-
+// GPS altitude and accuracy (integer split to avoid %f)
+static int32_t  alt_int;            // altitude integer part in metres (signed)
+static uint32_t alt_frac;           // altitude fractional part (2 digits, always positive)
+static uint32_t hdop_int, hdop_frac; // HDOP split at decimal (e.g. 1 and 20 for HDOP 1.20)
 
 /* USER CODE END PV */
 
@@ -440,6 +444,10 @@ int main(void)
       telem.gps_utc_date        = last_gps_fix.utc_date;                        // gps utc date in ddmmyy format, e.g. 150623 means 15 June 2023
       telem.gps_speed_cms       = last_gps_fix.speed_cms;                       // gps speed in cm/s, e.g. 5144 means 51.44 cm/s
       telem.gps_course_cd       = last_gps_fix.course_cd;                       // gps course over ground in centidegrees, e.g. 12345 means 123.45°
+      telem.gps_alt_cm          = gps_status.alt_cm;                            // GPS altitude above MSL in cm from $GNGGA (e.g. 15000 = 150.00 m)
+      telem.gps_hdop            = gps_status.hdop_c;                            // HDOP × 100 from $GNGGA (e.g. 120 = 1.20; lower is more accurate)
+      telem.gps_sats            = gps_status.gga_sats;                          // satellites used in fix from $GNGGA field 7
+      telem.gps_fix_type        = gps_status.gga_quality;                       // fix quality from $GNGGA field 6: 0=no fix, 1=GPS, 2=DGPS
 
       /* === Debug UART output === */
       /* Unpack GPS fields from integers for display — avoids %f and float printf */
@@ -467,6 +475,12 @@ int main(void)
       spd_frac = last_gps_fix.speed_cms % 100;
       hdg_int  = last_gps_fix.course_cd / 100;
       hdg_frac = last_gps_fix.course_cd % 100;
+      // Altitude: signed integer metres + 2-digit fraction (always positive)
+      alt_int  = gps_status.alt_cm / 100;
+      alt_frac = (uint32_t)((gps_status.alt_cm < 0 ? -gps_status.alt_cm : gps_status.alt_cm) % 100);
+      // HDOP: split at decimal for integer printf
+      hdop_int  = gps_status.hdop_c / 100;
+      hdop_frac = gps_status.hdop_c % 100;
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
 
@@ -497,15 +511,16 @@ int main(void)
           printf(" GPS    %lu.%07lu %c   %lu.%07lu %c\r\n",
                  (unsigned long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
                  (unsigned long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
+          printf("        Alt: %ld.%02lu m MSL   HDOP: %lu.%02lu\r\n", (long)alt_int, alt_frac, hdop_int, hdop_frac);
           printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n",
                  gps_t/10000, (gps_t%10000)/100, gps_t%100,
                  gps_d/10000, (gps_d%10000)/100, gps_d%100);
-          printf("        %lu.%02lu m/s   %lu.%02lu deg\r\n",
-                 spd_int, spd_frac, hdg_int, hdg_frac);
-          printf("        %s fix | %u used / %u in view\r\n",
-                 fix_str, gps_status.sats_in_use, gps_status.sats_in_view);
+          printf("        %lu.%02lu m/s   %lu.%02lu deg\r\n", spd_int, spd_frac, hdg_int, hdg_frac);
+          printf("        %s fix | %u sats\r\n", fix_str, gps_status.gga_sats);
+
       } else if (gps_status.sats_in_view == 0) {
           printf(" GPS    No signal\r\n");
+          
       } else {
           printf(" GPS    Searching | %u in view\r\n", gps_status.sats_in_view);
       }

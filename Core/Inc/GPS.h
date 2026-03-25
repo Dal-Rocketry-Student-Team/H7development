@@ -19,13 +19,17 @@ typedef struct {
     uint16_t course_cd;
 } GPS_RMC_t;
 
-/* GPS acquisition status, updated continuously from GNGSA and GSV sentences.
+/* GPS acquisition status, updated continuously from GGA, GNGSA, and GSV sentences.
  * Populated even when there is no valid fix, so the display can show
  * "Searching (N in view)" rather than a plain "No fix". */
 typedef struct {
-    uint8_t fix_type;     // 1 = no fix,  2 = 2D fix,  3 = 3D fix  (from GNGSA field 2)
-    uint8_t sats_in_use;  // satellites actively used in the solution (GNGSA PRN fields, all constellations)
-    uint8_t sats_in_view; // total satellites visible (GPGSV + GLGSV field 3 sum)
+    uint8_t  fix_type;     // 1 = no fix,  2 = 2D fix,  3 = 3D fix  (from GNGSA field 2)
+    uint8_t  sats_in_use;  // satellites actively used in the solution (GNGSA PRN count, all constellations)
+    uint8_t  sats_in_view; // total satellites visible (GPGSV + GLGSV field 3 sum)
+    uint8_t  gga_quality;  // fix quality from GNGGA field 6: 0=no fix, 1=GPS, 2=DGPS
+    uint8_t  gga_sats;     // satellites in use from GNGGA field 7 (direct integer, no PRN counting)
+    int32_t  alt_cm;       // MSL altitude in centimetres from GNGGA field 9 (e.g. 15000 = 150.00 m)
+    uint16_t hdop_c;       // HDOP × 100 from GNGGA field 8 (e.g. 120 = HDOP 1.20; lower is better)
 } GPS_status_t;
 
 uint8_t GPS_pop(GPS_RMC_t *out);
