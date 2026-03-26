@@ -452,7 +452,7 @@ int main(void)
       telem.gps_hdop            = gps_status.hdop_c;                            // HDOP × 100 from $GNGGA (e.g. 120 = 1.20; lower is more accurate)
       telem.gps_sats_in_use     = gps_status.sats_in_use;                       // satellites used in fix
       telem.gps_sats_in_view    = gps_status.sats_in_view;                      // satellites in view
-      telem.gps_fix_type        = gps_status.gga_quality;                       // fix quality from $GNGGA field 6: 0=no fix, 1=GPS, 2=DGPS
+      telem.gps_fix_type        = gps_status.fix_type;                          // fix type from GNGSA field 2: 1=no fix, 2=2D fix, 3=3D fix
 
       /* === Debug UART output === */
       /* Unpack GPS fields from integers for display — avoids %f and float printf */
