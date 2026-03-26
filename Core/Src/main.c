@@ -101,6 +101,10 @@ float    hdg_deg;   // course over ground in degrees  (converted from gps_course
 float    gps_alt;   // GPS altitude above MSL in metres  (converted from gps_alt_cm / 100)
 float    hdop;      // Horizontal Dilution of Precision  (converted from gps_hdop / 100)
 uint8_t  has_fix;   // 1 if lat/lon are non-zero (valid fix), 0 otherwise
+// GPS stale counter
+static uint32_t prev_gps_utc_time = 0xFFFFFFFFu;  // initialized to invalid time so first fix is always "new"
+static uint8_t gps_stale_count = 0;                   // counts how many packets are stale
+uint8_t gps_is_stale = 1;                        // flag to indicate if GPS data is stale (initialized to true until we get a fix)  
 
 /* USER CODE END PV */
 
@@ -401,6 +405,14 @@ int main(void)
             // Rocket sends 0.0f for lat/lon when there is no fix (zero-initialised struct)
             has_fix = (p->gps_lat != 0.0f || p->gps_lon != 0.0f);
 
+            if (gps_t == prev_gps_utc_time) {
+                if (gps_stale_count < 0xFF) gps_stale_count++;  // increment stale count if time hasn't changed, up to max of 255
+            } else {
+              gps_stale_count = 0;              // reset stale count if we got a new fix
+              prev_gps_utc_time = gps_t;        // update previous time to current time for next iteration's comparison
+            }
+            gps_is_stale = (gps_stale_count >= 3);  // Consider GPS data stale if no new utc time update for 3 consecutive packets
+
             // Formatted print output
             printf("\r\n===========================================\r\n");
 
@@ -413,12 +425,12 @@ int main(void)
             printf(" ACCEL  X=%5.3f g Y=%5.3f g Z=%5.3f g\r\n", p->ax / 2048.0f, p->ay / 2048.0f, p->az / 2048.0f);
             printf(" GYRO   X=%4.1f dps Y=%4.1f dps Z=%4.1f dps\r\n", p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
             if (has_fix) {
-                const char *fix_str = (p->gps_fix_type == 2) ? "DGPS" : "GPS";
+                const char *fix_str = gps_is_stale ? "STALE" : (p->gps_fix_type == 3) ? "3D" : "2D";
                 printf(" GPS   lat=%.6f  lon=%.6f\r\n", p->gps_lat, p->gps_lon);
                 printf("        Alt: %.2f m MSL   HDOP: %.2f\r\n", gps_alt, hdop);
                 printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n", gps_t/10000, (gps_t%10000)/100, gps_t%100, gps_d/10000, (gps_d%10000)/100, gps_d%100);
                 printf("        %.2f m/s   %.2f deg\r\n", spd_ms, hdg_deg);
-                printf("        %s fix | %u sats\r\n", fix_str, p->gps_sats);
+                printf("        %s fix | %u in view / %u in use\r\n", fix_str, p->gps_sats_in_view, p->gps_sats_in_use);
             } else {
                 printf(" GPS    No fix\r\n");
 
