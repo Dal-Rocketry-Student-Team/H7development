@@ -425,12 +425,12 @@ int main(void)
             printf(" ACCEL  X=%5.3f g Y=%5.3f g Z=%5.3f g\r\n", p->ax / 2048.0f, p->ay / 2048.0f, p->az / 2048.0f);
             printf(" GYRO   X=%4.1f dps Y=%4.1f dps Z=%4.1f dps\r\n", p->gx / 16.4f, p->gy / 16.4f, p->gz / 16.4f);
             if (has_fix) {
-                const char *fix_str = gps_is_stale ? "STALE" : (p->gps_fix_type == 3) ? "3D" : "2D";
+                const char *fix_str = gps_is_stale        ? "STALE" : (p->gps_fix_type == 2) ? "3D" : "2D";
                 printf(" GPS   lat=%.6f  lon=%.6f\r\n", p->gps_lat, p->gps_lon);
                 printf("        Alt: %.2f m MSL   HDOP: %.2f\r\n", gps_alt, hdop);
                 printf("        %02lu:%02lu:%02lu UTC   %02lu/%02lu/%02lu\r\n", gps_t/10000, (gps_t%10000)/100, gps_t%100, gps_d/10000, (gps_d%10000)/100, gps_d%100);
                 printf("        %.2f m/s   %.2f deg\r\n", spd_ms, hdg_deg);
-                printf("        %s fix | %u in view / %u in use\r\n", fix_str, p->gps_sats_in_view, p->gps_sats_in_use);
+                printf("        %s fix | %u in use / %u in view\r\n", fix_str, p->gps_sats_in_use, p->gps_sats_in_view);
             } else {
                 printf(" GPS    No fix\r\n");
 
