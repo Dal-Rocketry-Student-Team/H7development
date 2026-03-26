@@ -99,19 +99,23 @@ static GPS_status_t gps_status = {0};   // live acquisition status: fix type, sa
 static int32_t  ax_mg,   ay_mg,   az_mg;          // accel in milli-g
 static int32_t  gx_tdps, gy_tdps, gz_tdps;        // gyro in tenths-dps
 // Baro
-static int16_t  temp_cdeg;   // temperature in centi-degrees (copy of telem field)
-static int16_t  temp_int;    // integer part of temperature in degrees
-static uint16_t temp_frac;   // fractional part (always positive, 2 digits)
+static int16_t  temp_cdeg;    // temperature in centi-degrees (copy of telem field)
+static int16_t  temp_int;     // integer part of temperature in degrees
+static uint16_t temp_frac;    // fractional part (always positive, 2 digits)
 // GPS — sign/magnitude split for %lu.%07lu printing without %f
-static int32_t  lat_raw, lon_raw;    // absolute value copies for digit extraction
-static char     lat_hem, lon_hem;    // hemisphere characters ('N'/'S', 'E'/'W')
-static uint32_t gps_t, gps_d;       // utc_time and utc_date copies for unpacking
-static uint32_t spd_int, spd_frac;  // speed in m/s split at decimal point
-static uint32_t hdg_int, hdg_frac;  // heading in degrees split at decimal point
+static int32_t  lat_raw, lon_raw;       // absolute value copies for digit extraction
+static char     lat_hem, lon_hem;       // hemisphere characters ('N'/'S', 'E'/'W')
+static uint32_t gps_t, gps_d;           // utc_time and utc_date copies for unpacking
+static uint32_t spd_int, spd_frac;      // speed in m/s split at decimal point
+static uint32_t hdg_int, hdg_frac;      // heading in degrees split at decimal point
 // GPS altitude and accuracy (integer split to avoid %f)
-static int32_t  alt_int;            // altitude integer part in metres (signed)
-static uint32_t alt_frac;           // altitude fractional part (2 digits, always positive)
-static uint32_t hdop_int, hdop_frac; // HDOP split at decimal (e.g. 1 and 20 for HDOP 1.20)
+static int32_t  alt_int;                // altitude integer part in metres (signed)
+static uint32_t alt_frac;               // altitude fractional part (2 digits, always positive)
+static uint32_t hdop_int, hdop_frac;    // HDOP split at decimal (e.g. 1 and 20 for HDOP 1.20)
+// GPS stale counter
+static uint32_t prev_gps_utc_time = 0xFFFFFFFFu;  // initialized to invalid time so first fix is always "new"
+static uint8_t gps_stale_count = 0;                   // counts how many packets are stale
+uint8_t gps_is_stale = 1;                        // flag to indicate if GPS data is stale (initialized to true until we get a fix)  
 
 /* USER CODE END PV */
 
@@ -446,7 +450,8 @@ int main(void)
       telem.gps_course_cd       = last_gps_fix.course_cd;                       // gps course over ground in centidegrees, e.g. 12345 means 123.45°
       telem.gps_alt_cm          = gps_status.alt_cm;                            // GPS altitude above MSL in cm from $GNGGA (e.g. 15000 = 150.00 m)
       telem.gps_hdop            = gps_status.hdop_c;                            // HDOP × 100 from $GNGGA (e.g. 120 = 1.20; lower is more accurate)
-      telem.gps_sats            = gps_status.gga_sats;                          // satellites used in fix from $GNGGA field 7
+      telem.gps_sats_in_use     = gps_status.sats_in_use;                       // satellites used in fix
+      telem.gps_sats_in_view    = gps_status.sats_in_view;                      // satellites in view
       telem.gps_fix_type        = gps_status.gga_quality;                       // fix quality from $GNGGA field 6: 0=no fix, 1=GPS, 2=DGPS
 
       /* === Debug UART output === */
@@ -478,9 +483,17 @@ int main(void)
       // Altitude: signed integer metres + 2-digit fraction (always positive)
       alt_int  = gps_status.alt_cm / 100;
       alt_frac = (uint32_t)((gps_status.alt_cm < 0 ? -gps_status.alt_cm : gps_status.alt_cm) % 100);
-      // HDOP: split at decimal for integer printf
+      // HDOP [HorizontaL Dilution of Precision]: It indicates how good the spread of satellites in the sky is — split at decimal for integer printf
       hdop_int  = gps_status.hdop_c / 100;
       hdop_frac = gps_status.hdop_c % 100;
+
+      if (gps_t == prev_gps_utc_time) {
+          if (gps_stale_count < 0xFF) gps_stale_count++;  // increment stale count if time hasn't changed, up to max of 255
+      } else {
+        gps_stale_count = 0;              // reset stale count if we got a new fix
+        prev_gps_utc_time = gps_t;        // update previous time to current time for next iteration's comparison
+      }
+      gps_is_stale = (gps_stale_count >= 3);  // Consider GPS data stale if no new utc time update for 3 consecutive packets
 
       tx_rc = SX1262_TransmitLora((uint8_t*)&telem, sizeof(telem), 1000);
 
@@ -507,7 +520,7 @@ int main(void)
        *   Searching  → fix_type 1, sats visible  (acquiring — needs clear sky view)
        *   Fix        → fix_type 2 or 3           (2D = altitude unreliable) */
       if (last_gps_fix.valid) {
-          const char *fix_str = (gps_status.fix_type == 3) ? "3D" : "2D";
+          const char *fix_str = gps_is_stale        ? "STALE" : (gps_status.fix_type == 3) ? "3D" : "2D";
           printf(" GPS    %lu.%07lu %c   %lu.%07lu %c\r\n",
                  (unsigned long)(lat_raw / 10000000), (unsigned long)(lat_raw % 10000000), lat_hem,
                  (unsigned long)(lon_raw / 10000000), (unsigned long)(lon_raw % 10000000), lon_hem);
@@ -516,7 +529,7 @@ int main(void)
                  gps_t/10000, (gps_t%10000)/100, gps_t%100,
                  gps_d/10000, (gps_d%10000)/100, gps_d%100);
           printf("        %lu.%02lu m/s   %lu.%02lu deg\r\n", spd_int, spd_frac, hdg_int, hdg_frac);
-          printf("        %s fix | %u sats\r\n", fix_str, gps_status.gga_sats);
+          printf("        %s fix | %u in use / %u in view\r\n", fix_str, gps_status.sats_in_use, gps_status.sats_in_view);
 
       } else if (gps_status.sats_in_view == 0) {
           printf(" GPS    No signal\r\n");
